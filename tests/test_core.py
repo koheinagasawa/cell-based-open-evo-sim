@@ -1,6 +1,7 @@
 from simulation.cell import Cell
 from simulation.world import World
 import numpy as np
+import matplotlib.pyplot as plt
 
 class DummyGenome:
     def __init__(self, output_size):
@@ -47,3 +48,53 @@ def test_multiple_cells_with_different_output_sizes():
     assert c1.output_action == [4, 5]
     assert c2.output_action == [4, 5, 6]
 
+def default_time_encoding(t):
+    alphas = [0.5, 0.05, 0.005]  # Periods ≈ 125, 1250, 12500
+    return [v for a in alphas for v in (np.sin(t * a), np.cos(t * a))]
+
+class InputDependentGenome:
+    def __init__(self, output_size, time_dim=6):
+        self.output_size = output_size
+        self.time_dim = time_dim
+
+    def activate(self, inputs):
+        # Extract first neighbor's relative position
+        dx, dy = inputs[6], inputs[7]
+
+        # Extract time features from input tail
+        time_features = np.array(inputs[-self.time_dim:])
+
+        base = np.array(inputs[0:4])
+        offset = np.array([dx + time_features[0], dy + time_features[1]])
+
+        return np.concatenate([base, offset]).tolist()
+    
+def test_sense_neighbor_cells():
+    # Set up cells in fixed positions
+    cells = [
+        Cell(position=[0, 0], genome=InputDependentGenome(6), state_size=4, time_encoding_fn=default_time_encoding),
+        Cell(position=[1, 0], genome=InputDependentGenome(6), state_size=4, time_encoding_fn=default_time_encoding),
+        Cell(position=[-1, 1], genome=InputDependentGenome(6), state_size=4, time_encoding_fn=default_time_encoding),
+    ]
+
+    world = World(cells)
+
+    # Log output_action over time
+    logs = [[] for _ in cells]
+
+    for _ in range(10):
+        world.step()
+        for i, cell in enumerate(cells):
+            logs[i].append(cell.output_action.copy())
+
+    # Plot first two dimensions of output_action over time
+    for i, log in enumerate(logs):
+        x = [step[0] for step in log]
+        y = [step[1] for step in log]
+        plt.plot(x, y, label=f'Cell {i}')
+    plt.title("Output Action (dim 0 vs dim 1) over Time")
+    plt.xlabel("Output 0")
+    plt.ylabel("Output 1")
+    plt.legend()
+    plt.grid()
+    plt.show()
