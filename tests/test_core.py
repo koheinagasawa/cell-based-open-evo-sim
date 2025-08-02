@@ -2,6 +2,7 @@ from simulation.cell import Cell
 from simulation.world import World
 import numpy as np
 import matplotlib.pyplot as plt
+from tests.utils.test_utils import prepare_run
 
 class DummyGenome:
     def __init__(self, output_size):
@@ -70,11 +71,23 @@ class InputDependentGenome:
         return np.concatenate([base, offset]).tolist()
     
 def test_sense_neighbor_cells():
+    state_size = 4
+    num_steps = 10
+
+    config_dict = {
+        "genome": "NullGenome",
+        "state_size": state_size,
+        "action_size": 2,
+        "steps": num_steps
+    }
+
+    run_config, recorder = prepare_run(config_dict)
+
     # Set up cells in fixed positions
     cells = [
-        Cell(position=[0, 0], genome=InputDependentGenome(6), state_size=4, time_encoding_fn=default_time_encoding),
-        Cell(position=[1, 0], genome=InputDependentGenome(6), state_size=4, time_encoding_fn=default_time_encoding),
-        Cell(position=[-1, 1], genome=InputDependentGenome(6), state_size=4, time_encoding_fn=default_time_encoding),
+        Cell(position=[0, 0], genome=InputDependentGenome(6), state_size=state_size, time_encoding_fn=default_time_encoding),
+        Cell(position=[1, 0], genome=InputDependentGenome(6), state_size=state_size, time_encoding_fn=default_time_encoding),
+        Cell(position=[-1, 1], genome=InputDependentGenome(6), state_size=state_size, time_encoding_fn=default_time_encoding),
     ]
 
     world = World(cells)
@@ -82,10 +95,13 @@ def test_sense_neighbor_cells():
     # Log output_action over time
     logs = [[] for _ in cells]
 
-    for _ in range(10):
+    for _ in range(num_steps):
         world.step()
         for i, cell in enumerate(cells):
             logs[i].append(cell.output_action.copy())
+            recorder.record(i, cell)
+
+    recorder.save_all()
 
     # Plot first two dimensions of output_action over time
     for i, log in enumerate(logs):
