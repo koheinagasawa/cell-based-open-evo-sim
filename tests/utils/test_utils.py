@@ -94,3 +94,46 @@ def prepare_run(config_dict, commit="test"):
 
     recorder = Recorder(run_dir)
     return run_config, recorder
+
+def plot_state_trajectories(recorder):
+    import matplotlib.pyplot as plt
+
+    num_cells = len(recorder.state_log)
+    fig, axes = plt.subplots(num_cells, 1, figsize=(8, 3 * num_cells), sharex=True)
+
+    if num_cells == 1:
+        axes = [axes]  # Ensure iterable
+
+    for ax, (cell_id, states) in zip(axes, recorder.state_log.items()):
+        states = np.array(states)
+        short_id = cell_id[:6]
+        for i in range(states.shape[1]):
+            ax.plot(states[:, i], label=f"state_{i}")
+        ax.set_title(f"Cell {short_id}")
+        ax.set_ylabel("State Value")
+        ax.legend()
+        ax.grid()
+
+    axes[-1].set_xlabel("Time Step")
+    plt.tight_layout()
+    plt.show()
+
+def plot_position_trajectories(recorder):
+    import matplotlib.pyplot as plt
+
+    for cell_id, positions in recorder.position_log.items():
+        positions = np.array(positions)
+        short_id = cell_id[:6]
+        plt.plot(positions[:, 0], positions[:, 1], marker='o', label=f"{short_id}")
+
+        # Mark start and end positions
+        plt.text(positions[0, 0], positions[0, 1], f"{short_id}_start", fontsize=8, color='green')
+        plt.text(positions[-1, 0], positions[-1, 1], f"{short_id}_end", fontsize=8, color='red')
+
+    plt.title("Cell Position Trajectories")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.axis("equal")
+    plt.legend()
+    plt.grid()
+    plt.show()

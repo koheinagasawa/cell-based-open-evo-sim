@@ -2,7 +2,7 @@ from simulation.cell import Cell
 from simulation.world import World
 import numpy as np
 import matplotlib.pyplot as plt
-from tests.utils.test_utils import prepare_run
+import tests.utils.test_utils as tu
 
 class DummyGenome:
     def __init__(self, output_size):
@@ -81,7 +81,7 @@ def test_sense_neighbor_cells():
         "steps": num_steps
     }
 
-    run_config, recorder = prepare_run(config_dict)
+    run_config, recorder = tu.prepare_run(config_dict)
 
     # Set up cells in fixed positions
     cells = [
@@ -114,3 +114,132 @@ def test_sense_neighbor_cells():
     plt.legend()
     plt.grid()
     plt.show()
+
+    tu.plot_state_trajectories(recorder)
+    
+class ConstantGenome:
+    def __init__(self, output_size, value=1.0):
+        self.output = [value] * output_size
+
+    def activate(self, inputs):
+        return self.output
+
+
+class IncrementGenome:
+    def __init__(self, output_size):
+        self.output_size = output_size
+        self.counter = 0
+
+    def activate(self, inputs):
+        out = [(self.counter + i) % 10 for i in range(self.output_size)]
+        self.counter += 1
+        return out
+
+
+class NeighborEchoGenome:
+    def __init__(self, output_size, state_size=4):
+        self.output_size = output_size
+        self.state_size = state_size
+
+    def activate(self, inputs):
+        # Echo first neighbor's state if available, else zero
+        echo = inputs[6+2 : 6+2+self.state_size] if len(inputs) >= 6+2+self.state_size else [0]*self.state_size
+        echo = echo.tolist() if isinstance(echo, np.ndarray) else echo
+        return echo + [0] * (self.output_size - self.state_size)
+    
+def test_multiple_genomes_interaction():
+    state_size = 4
+    action_size = 2
+    output_size = state_size + action_size
+    steps = 10
+
+    config_dict = {
+        "genome": "Mixed",
+        "state_size": state_size,
+        "action_size": action_size,
+        "steps": steps
+    }
+
+    run_config, recorder = tu.prepare_run(config_dict)
+
+    cells = [
+        Cell(position=[0, 0], genome=ConstantGenome(output_size), state_size=state_size),
+        Cell(position=[1, 0], genome=IncrementGenome(output_size), state_size=state_size),
+        Cell(position=[-1, 1], genome=NeighborEchoGenome(output_size, state_size), state_size=state_size),
+    ]
+
+    world = World(cells)
+
+    for t in range(steps):
+        world.step()
+        for i, cell in enumerate(cells):
+            dx, dy = cell.output_action[:2]
+            cell.position += np.array([dx, dy])
+            recorder.record(t, cell)
+
+    recorder.save_all()
+    tu.plot_state_trajectories(recorder)
+
+class RandomMoveGenome:
+    def __init__(self, output_size, state_size=4):
+        self.output_size = output_size
+        self.state_size = state_size
+
+    def activate(self, inputs):
+        state = np.random.uniform(-1, 1, self.state_size)
+        action = np.random.uniform(-0.5, 0.5, self.output_size - self.state_size)
+        return np.concatenate([state, action]).tolist()
+
+class OscillatingGenome:
+    def __init__(self, output_size, state_size=4):
+        self.output_size = output_size
+        self.state_size = state_size
+        self.t = 0
+
+    def activate(self, inputs):
+        state = np.array([
+            np.sin(self.t * 0.1),
+            np.cos(self.t * 0.1),
+            np.sin(self.t * 0.2),
+            np.cos(self.t * 0.2),
+        ])[:self.state_size]
+
+        action = np.array([
+            np.sin(self.t * 0.2),
+            np.cos(self.t * 0.2)
+        ])
+        self.t += 1
+        return np.concatenate([state, action]).tolist()    
+    
+def test_cells_with_movement():
+    state_size = 4
+    action_size = 2
+    output_size = state_size + action_size
+    steps = 20
+
+    config_dict = {
+        "genome": "MovementTest",
+        "state_size": state_size,
+        "action_size": action_size,
+        "steps": steps
+    }
+
+    run_config, recorder = tu.prepare_run(config_dict)
+
+    cells = [
+        Cell(position=[0, 0], genome=RandomMoveGenome(output_size), state_size=state_size),
+        Cell(position=[3, 0], genome=OscillatingGenome(output_size), state_size=state_size),
+    ]
+
+    world = World(cells)
+
+    for t in range(steps):
+        world.step()
+        for cell in cells:
+            dx, dy = cell.output_action[:2]
+            cell.position += np.array([dx, dy])
+            recorder.record(t, cell)
+
+    recorder.save_all()
+    tu.plot_state_trajectories(recorder)
+    tu.plot_position_trajectories(recorder)
