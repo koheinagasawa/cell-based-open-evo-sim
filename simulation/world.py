@@ -1,6 +1,9 @@
 import numpy as np
 
+
 class World:
+    supported_actions = ["move"]
+
     def __init__(self, cells):
         """
         Initialize the world with a list of Cell objects.
@@ -28,4 +31,18 @@ class World:
         for cell in self.cells:
             neighbors = self.get_neighbors(cell)
             cell.step(neighbors)
+            self.apply_cell_actions(cell)
         self.time += 1
+
+    def apply_cell_actions(self, cell):
+        for action_key in self.supported_actions:
+            value = cell.output_slots.get(action_key)
+            if value is not None:
+                handler = getattr(self, f"apply_{action_key}", self.noop)
+                handler(cell, value)
+
+    def apply_move(self, cell, delta):
+        cell.position += np.array(delta)
+
+    def noop(self, cell, value):
+        pass

@@ -1,19 +1,21 @@
-import numpy as np
 import csv
-import uuid
 import hashlib
 import json
+import uuid
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
+
+
 class RunConfig:
     def __init__(self, seed, config_dict, commit="unknown"):
-        self.seed = seed                        # Seed for random number genenerator
-        self.commit = commit                    # GitHub commit ID
-        self.config = config_dict               # The configurations
-        self.run_id = str(uuid.uuid4())[:8]     # Unique ID of this run
+        self.seed = seed  # Seed for random number genenerator
+        self.commit = commit  # GitHub commit ID
+        self.config = config_dict  # The configurations
+        self.run_id = str(uuid.uuid4())[:8]  # Unique ID of this run
         self.config_hash = self._hash_config()  # Hash of the configurations
-        self.dir = None                         # Directory to save this config and output results
+        self.dir = None  # Directory to save this config and output results
 
     def _hash_config(self):
         s = json.dumps(self.config, sort_keys=True)
@@ -28,19 +30,24 @@ class RunConfig:
         if self.dir is None:
             raise ValueError("Directory not set")
         with open(self.dir / "run.json", "w") as f:
-            json.dump({
-                "seed": self.seed,
-                "commit": self.commit,
-                "config": self.config,
-                "config_hash": self.config_hash,
-                "run_id": self.run_id
-            }, f, indent=2)
-            
+            json.dump(
+                {
+                    "seed": self.seed,
+                    "commit": self.commit,
+                    "config": self.config,
+                    "config_hash": self.config_hash,
+                    "run_id": self.run_id,
+                },
+                f,
+                indent=2,
+            )
+
+
 class Recorder:
     def __init__(self, output_dir):
         self.output_dir = output_dir
         self.position_log = defaultdict(list)  # {cell_id: [positions]}
-        self.state_log = defaultdict(list)     # {cell_id: [states]}
+        self.state_log = defaultdict(list)  # {cell_id: [states]}
         self.metric_log = []  # [{step, cell_id, pos_0, pos_1, ..., age}]
 
     def record(self, step, cell):
@@ -70,19 +77,21 @@ class Recorder:
     def save_all(self):
         # Save metrics.csv
         fieldnames = list(self.metric_log[0].keys())
-        with open(self.output_dir / "metrics.csv", "w", newline='') as f:
+        with open(self.output_dir / "metrics.csv", "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(self.metric_log)
 
         # Save raw arrays
-        np.savez(self.output_dir / "raw_data.npz",
-                 positions={k: np.array(v) for k, v in self.position_log.items()},
-                 states={k: np.array(v) for k, v in self.state_log.items()})
-        
-        
+        np.savez(
+            self.output_dir / "raw_data.npz",
+            positions={k: np.array(v) for k, v in self.position_log.items()},
+            states={k: np.array(v) for k, v in self.state_log.items()},
+        )
+
         print(f"✅ Experiment results saved in: {self.output_dir}")
-        
+
+
 def prepare_run(config_dict, commit="test"):
     """
     Initialize RunConfig and Recorder and return them.
@@ -94,6 +103,7 @@ def prepare_run(config_dict, commit="test"):
 
     recorder = Recorder(run_dir)
     return run_config, recorder
+
 
 def plot_state_trajectories(recorder, show=True):
     import matplotlib.pyplot as plt
@@ -123,17 +133,30 @@ def plot_state_trajectories(recorder, show=True):
         plt.savefig(recorder.output_dir / "state_plot.png")
         plt.close()
 
+
 def plot_2D_position_trajectories(recorder, show=True):
     import matplotlib.pyplot as plt
 
     for cell_id, positions in recorder.position_log.items():
         positions = np.array(positions)
         short_id = cell_id[:6]
-        plt.plot(positions[:, 0], positions[:, 1], marker='o', label=f"{short_id}")
+        plt.plot(positions[:, 0], positions[:, 1], marker="o", label=f"{short_id}")
 
         # Mark start and end positions
-        plt.text(positions[0, 0], positions[0, 1], f"{short_id}_start", fontsize=8, color='green')
-        plt.text(positions[-1, 0], positions[-1, 1], f"{short_id}_end", fontsize=8, color='red')
+        plt.text(
+            positions[0, 0],
+            positions[0, 1],
+            f"{short_id}_start",
+            fontsize=8,
+            color="green",
+        )
+        plt.text(
+            positions[-1, 0],
+            positions[-1, 1],
+            f"{short_id}_end",
+            fontsize=8,
+            color="red",
+        )
 
     plt.title("Cell Position Trajectories")
     plt.xlabel("X")

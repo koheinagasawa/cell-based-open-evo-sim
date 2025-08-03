@@ -1,13 +1,27 @@
-import numpy as np
 import uuid
 
+import numpy as np
+
+
 class Cell:
-    def __init__(self, position, genome, id=None, state_size=4, time_encoding_fn=None):
+    def __init__(
+        self,
+        position,
+        genome,
+        id=None,
+        state_size=4,
+        interpreter=None,
+        time_encoding_fn=None,
+    ):
         self.id = id or str(uuid.uuid4())
         self.position = np.array(position, dtype=float)
-        self.genome = genome # Neural network shared by multiple cells
-        self.state = np.zeros(state_size) # Abstract internal states of the cell
-        self.output_action = np.zeros(0) # will be overwritten by act()
+        self.genome = genome  # Neural network shared by multiple cells
+        self.interpreter = (
+            interpreter  # Interpreter used to map the genome's output to local slots
+        )
+        self.state = np.zeros(state_size)  # Abstract internal states of the cell
+        self.raw_output = None  # Last raw output vector from genome
+        self.output_slots = {}  # Interpreted output dictionary (e.g. "move", "state")
         self.age = 0
         self.time_encoding_fn = time_encoding_fn  # Optional time input encoder
 
@@ -44,12 +58,16 @@ class Cell:
     def act(self, inputs):
         """
         Generate outputs using the genome network and provided inputs.
-        The outputs contain updated cell's internal state and also one-time actions.
+        The outputs are interpreted by the interpreter and used to update Cell's internal states.
         """
         outputs = self.genome.activate(inputs)
-        new_state = np.array(outputs[:len(self.state)])
-        self.update_state(new_state)
-        self.output_action = outputs[len(self.state):]
+        self.raw_output = np.array(outputs)
+
+        if self.interpreter:
+            slots = self.interpreter.interpret(self.raw_output)
+            self.output_slots = slots
+            if "state" in slots:
+                self.state = np.array(slots["state"])
 
     def update_state(self, new_state):
         """Default behavior: overwrite internal state."""
