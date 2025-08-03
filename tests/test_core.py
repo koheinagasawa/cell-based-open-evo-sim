@@ -75,7 +75,7 @@ def test_sense_neighbor_cells():
     num_steps = 10
 
     config_dict = {
-        "genome": "NullGenome",
+        "genome": "InputDependentGenome",
         "state_size": state_size,
         "action_size": 2,
         "steps": num_steps
@@ -92,30 +92,13 @@ def test_sense_neighbor_cells():
 
     world = World(cells)
 
-    # Log output_action over time
-    logs = [[] for _ in cells]
-
     for _ in range(num_steps):
         world.step()
         for i, cell in enumerate(cells):
-            logs[i].append(cell.output_action.copy())
             recorder.record(i, cell)
 
     recorder.save_all()
-
-    # Plot first two dimensions of output_action over time
-    for i, log in enumerate(logs):
-        x = [step[0] for step in log]
-        y = [step[1] for step in log]
-        plt.plot(x, y, label=f'Cell {i}')
-    plt.title("Output Action (dim 0 vs dim 1) over Time")
-    plt.xlabel("Output 0")
-    plt.ylabel("Output 1")
-    plt.legend()
-    plt.grid()
-    plt.show()
-
-    tu.plot_state_trajectories(recorder)
+    tu.plot_state_trajectories(recorder, False)
     
 class ConstantGenome:
     def __init__(self, output_size, value=1.0):
@@ -148,7 +131,7 @@ class NeighborEchoGenome:
         return echo + [0] * (self.output_size - self.state_size)
     
 def test_multiple_genomes_interaction():
-    state_size = 4
+    state_size = 2
     action_size = 2
     output_size = state_size + action_size
     steps = 10
@@ -178,7 +161,8 @@ def test_multiple_genomes_interaction():
             recorder.record(t, cell)
 
     recorder.save_all()
-    tu.plot_state_trajectories(recorder)
+    tu.plot_state_trajectories(recorder, False)
+    tu.plot_2D_position_trajectories(recorder, False)
 
 class RandomMoveGenome:
     def __init__(self, output_size, state_size=4):
@@ -211,6 +195,18 @@ class OscillatingGenome:
         self.t += 1
         return np.concatenate([state, action]).tolist()    
     
+class DirectionalMemoryGenome:
+    def __init__(self, output_size, state_size=4):
+        self.output_size = output_size
+        self.state_size = state_size
+
+    def activate(self, inputs):
+        # Keep internal state increasing, use it for movement
+        memory = np.array(inputs[2:2+self.state_size])
+        new_state = memory + 1
+        direction = new_state[:2] * 0.1
+        return np.concatenate([new_state, direction]).tolist()
+    
 def test_cells_with_movement():
     state_size = 4
     action_size = 2
@@ -229,6 +225,7 @@ def test_cells_with_movement():
     cells = [
         Cell(position=[0, 0], genome=RandomMoveGenome(output_size), state_size=state_size),
         Cell(position=[3, 0], genome=OscillatingGenome(output_size), state_size=state_size),
+        Cell(position=[0, 3], genome=DirectionalMemoryGenome(output_size), state_size=state_size),
     ]
 
     world = World(cells)
@@ -241,5 +238,5 @@ def test_cells_with_movement():
             recorder.record(t, cell)
 
     recorder.save_all()
-    tu.plot_state_trajectories(recorder)
-    tu.plot_position_trajectories(recorder)
+    tu.plot_state_trajectories(recorder, False)
+    tu.plot_2D_position_trajectories(recorder, False)

@@ -95,7 +95,7 @@ def prepare_run(config_dict, commit="test"):
     recorder = Recorder(run_dir)
     return run_config, recorder
 
-def plot_state_trajectories(recorder):
+def plot_state_trajectories(recorder, show=True):
     import matplotlib.pyplot as plt
 
     num_cells = len(recorder.state_log)
@@ -116,9 +116,14 @@ def plot_state_trajectories(recorder):
 
     axes[-1].set_xlabel("Time Step")
     plt.tight_layout()
-    plt.show()
 
-def plot_position_trajectories(recorder):
+    if show:
+        plt.show()
+    else:
+        plt.savefig(recorder.output_dir / "state_plot.png")
+        plt.close()
+
+def plot_2D_position_trajectories(recorder, show=True):
     import matplotlib.pyplot as plt
 
     for cell_id, positions in recorder.position_log.items():
@@ -136,4 +141,8 @@ def plot_position_trajectories(recorder):
     plt.axis("equal")
     plt.legend()
     plt.grid()
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.savefig(recorder.output_dir / "position_plot.png")
+        plt.close()
