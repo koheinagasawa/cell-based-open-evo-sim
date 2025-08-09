@@ -34,19 +34,14 @@ class Cell:
         """
         input_vec = list(self.position) + list(self.state)
 
-        # Sort neighbors by distance (optional but can stabilize learning)
-        sorted_neighbors = sorted(
-            neighbors, key=lambda n: np.linalg.norm(n.position - self.position)
-        )[:max_neighbors]
-
-        for neighbor in sorted_neighbors:
+        for neighbor in neighbors:
             rel_pos = neighbor.position - self.position  # relative position
             input_vec += list(rel_pos)
             input_vec += list(neighbor.state)
 
         # Pad with zeros if not enough neighbors
         position_dim = self.position.shape[0]
-        pad_count = max_neighbors - len(sorted_neighbors)
+        pad_count = max_neighbors - len(neighbors)
         input_vec += [0.0] * (pad_count * (position_dim + len(self.state)))
 
         # Add time encoding, if applicable

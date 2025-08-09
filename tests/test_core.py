@@ -355,3 +355,61 @@ def test_cells_with_movement():
     recorder.save_all()
     tu.plot_state_trajectories(recorder, True)
     tu.plot_2D_position_trajectories(recorder, True)
+
+
+class FirstNeighborChaserGenome:
+    """Genome that moves toward the first neighbor's relative position."""
+
+    def __init__(self, state_size, action_size):
+        self.state_size = state_size
+        self.action_size = action_size
+
+    def activate(self, inputs):
+        # inputs = [self_pos(2), self_state(S), n0_rel(2), n0_state(S), ...]
+        dx, dy = inputs[2 + self.state_size : 2 + self.state_size + 2]
+        # Return: new state (unchanged zeros) + move (chase neighbor)
+        return [0.0] * self.state_size + [dx, dy]
+
+
+def make_world(order="normal"):
+    state_size = 4
+    interpreter = SlotBasedInterpreter(
+        {
+            "state": slice(0, state_size),
+            "move": slice(state_size, state_size + 2),
+        }
+    )
+    g = FirstNeighborChaserGenome(state_size, 2)
+    cells = [
+        Cell(
+            position=[0.0, 0.0],
+            genome=g,
+            state_size=state_size,
+            interpreter=interpreter,
+        ),
+        Cell(
+            position=[1.0, 0.0],
+            genome=g,
+            state_size=state_size,
+            interpreter=interpreter,
+        ),
+        Cell(
+            position=[2.0, 0.0],
+            genome=g,
+            state_size=state_size,
+            interpreter=interpreter,
+        ),
+    ]
+    if order == "reversed":
+        cells = list(reversed(cells))
+    return World(cells)
+
+
+def test_two_phase_is_order_invariant():
+    w1 = make_world("normal")
+    w2 = make_world("reversed")
+    w1.step()
+    w2.step()
+    pos1 = np.stack([c.position for c in w1.cells], axis=0)
+    pos2 = np.stack([c.position for c in w2.cells], axis=0)
+    np.testing.assert_allclose(pos1, pos2, atol=1e-12)
