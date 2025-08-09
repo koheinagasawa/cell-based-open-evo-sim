@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-import tests.utils.test_utils as tu
+import tests.utils.visualization as visualization
 from simulation.cell import Cell
 from simulation.world import World
 
@@ -179,7 +179,7 @@ def test_multiple_genomes_interaction2(interpreter4, run_env_factory):
 
     recorder.save_all()
 
-    tu.plot_state_trajectories(recorder, True)
-    tu.plot_2D_position_trajectories(recorder, True)
-    # tu.plot_quiver_last_step(recorder, True)
-    # tu.plot_quiver_along_trajectories(recorder, True)
+    visualization.plot_state_trajectories(recorder, True)
+    visualization.plot_2D_position_trajectories(recorder, True)
+    # vis.plot_quiver_last_step(recorder, True)
+    # vis.plot_quiver_along_trajectories(recorder, True)

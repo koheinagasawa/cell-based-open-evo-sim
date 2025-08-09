@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import tests.utils.visualization as visualization
 from simulation.cell import Cell
 from simulation.world import World
 
@@ -71,5 +72,5 @@ def test_sense_neighbor_cells(interpreter4, run_env_factory):
 
     recorder.save_all()
     # Keep plotting disabled for CI speed
-    # tu.plot_state_trajectories(recorder, False)
-    # tu.plot_2D_position_trajectories(recorder, False)
+    # vis.plot_state_trajectories(recorder, False)
+    # vis.plot_2D_position_trajectories(recorder, False)
