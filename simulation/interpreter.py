@@ -35,3 +35,54 @@ class SlotBasedInterpreter(Interpreter):
             result[key] = val
 
         return result
+
+    def to_metadata(self):
+        """Return JSON-serializable metadata for provenance/logging."""
+        import numpy as np
+
+        def _serialize_slotdef(sd):
+            # Normalize different slot definition formats into JSON-friendly dicts
+            if isinstance(sd, slice):
+                return {
+                    "kind": "slice",
+                    "start": sd.start,
+                    "stop": sd.stop,
+                    "step": sd.step,
+                }
+            if isinstance(sd, (int, np.integer)):
+                return {"kind": "index", "index": int(sd)}
+            if isinstance(sd, (list, tuple, np.ndarray)):
+                return {"kind": "indices", "indices": [int(x) for x in sd]}
+            # Fallback (rare): unknown type -> stringified
+            return {"kind": "unknown", "value": str(sd)}
+
+        def _slot_len(sd):
+            # Best-effort length computation
+            if isinstance(sd, slice):
+                start = 0 if sd.start is None else int(sd.start)
+                stop = 0 if sd.stop is None else int(sd.stop)
+                step = 1 if sd.step in (None, 0) else int(sd.step)
+                if stop < start or step <= 0:
+                    return 0
+                return (stop - start + step - 1) // step
+            if isinstance(sd, (int, np.integer)):
+                return 1
+            if isinstance(sd, (list, tuple, np.ndarray)):
+                return len(sd)
+            return None  # unknown
+
+        slot_defs_meta = {
+            name: _serialize_slotdef(sd) for name, sd in self.slot_defs.items()
+        }
+        slot_lengths = {name: _slot_len(sd) for name, sd in self.slot_defs.items()}
+        total_dim = None
+        if all(v is not None for v in slot_lengths.values()):
+            total_dim = int(sum(slot_lengths.values()))
+
+        return {
+            "class": self.__class__.__name__,
+            "module": self.__class__.__module__,
+            "slot_defs": slot_defs_meta,  # JSON-friendly view
+            "slot_lengths": slot_lengths,  # per-slot lengths (int or None)
+            "total_output_dim": total_dim,  # sum of lengths if computable
+        }

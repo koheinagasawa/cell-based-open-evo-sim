@@ -13,15 +13,18 @@ class NullGenome:
         return [0.5, 0.5, 0.5, 0.5, 0.0, 0.0]  # 4 state + 2 zero-move
 
 
-def test_simple_test_with_output_dir():
-    config_dict = {
-        "genome": "NullGenome",
-        "state_size": 1,
-        "action_size": 1,
-        "steps": 5,
-    }
-
-    run_config, recorder = prepare_run(config_dict, commit="core-loop")
+def test_simple_test_with_output_dir(run_env_factory):
+    state_size = 1
+    action_size = 1
+    steps = 5
+    run_config, recorder = run_env_factory(
+        {
+            "genome": "Mixed",
+            "state_size": state_size,
+            "action_size": action_size,
+            "steps": steps,
+        }
+    )
 
     # --- Prepare simulation ---
     genome = NullGenome()
@@ -33,12 +36,12 @@ def test_simple_test_with_output_dir():
     cell = Cell(
         position=[0.0, 0.0],
         genome=genome,
-        state_size=config_dict["state_size"],
+        state_size=state_size,
         interpreter=interpreter,
     )
     world = World([cell])
 
-    for step in range(config_dict["steps"]):
+    for step in range(steps):
         world.step()
         recorder.record(step, cell)
 

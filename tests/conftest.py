@@ -1,3 +1,9 @@
+import os
+import pathlib
+import re
+import time
+import uuid
+
 import numpy as np
 import pytest
 
@@ -6,9 +12,25 @@ from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
 from simulation.world import World
 
+
 # ---------------------------
 # Shared fixtures
 # ---------------------------
+@pytest.fixture(scope="session")
+def session_run_dir():
+    """Create a single output directory per pytest session and export it via env var.
+    Example: outputs/pytest_YYYYmmdd_HHMMSS_<8hex>/
+    """
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    short = uuid.uuid4().hex[:8]
+    root = pathlib.Path("outputs")
+    root.mkdir(parents=True, exist_ok=True)
+    session_dir = root / f"pytest_{stamp}_{short}"
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    # Make it available to any code via environment variable (fallback path)
+    os.environ["ALIFE_OUTPUT_SESSION_DIR"] = str(session_dir)
+    return str(session_dir)
 
 
 @pytest.fixture(scope="session")
@@ -103,12 +125,38 @@ def interpreter_factory():
 
 
 @pytest.fixture
-def run_env_factory():
-    """Factory wrapping tests.utils.test_utils.prepare_run().
-    Returns a function that takes a config_dict and returns (run_config, recorder).
-    """
+def run_env_factory(session_run_dir, request):
+    """Factory wrapping prepare_run(). Names each experiment folder after the test function.
 
-    def make(config_dict):
-        return tu.prepare_run(config_dict)
+    Example: tests/test_genome_interactions.py::test_multiple_genomes_interaction
+             -> exp folder 'test_multiple_genomes_interaction'
+             Parametrized cases append the param id.
+             Multiple runs within the same test get _02, _03... suffixes.
+    """
+    counter = {"n": 0}
+
+    def _sanitize(name: str) -> str:
+        # Include param id if present (pytest parametrization)
+        callspec = getattr(request.node, "callspec", None)
+        if callspec and getattr(callspec, "id", None):
+            name = f"{name}__{callspec.id}"
+        # Filesystem-safe: keep letters, numbers, '_', '-', '.'
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+        name = re.sub(r"_+", "_", name).strip("._-")
+        return name[:80]  # keep short-ish (Windows-friendly)
+
+    def make(config_dict, exp_name: str | None = None):
+        base = exp_name or _sanitize(request.node.name)
+        counter["n"] += 1
+        # If the same test calls prepare_run() multiple times, suffix with an index
+        name = base if counter["n"] == 1 else f"{base}_{counter['n']:02d}"
+        try:
+            return tu.prepare_run(
+                config_dict, session_dir=session_run_dir, exp_name=name
+            )
+        except TypeError:
+            # Old signature fallback (shouldn't happen after this patch)
+            os.environ["ALIFE_OUTPUT_SESSION_DIR"] = session_run_dir
+            return tu.prepare_run(config_dict)
 
     return make
