@@ -301,7 +301,7 @@ class DirectionalMemoryGenome:
         return np.concatenate([new_state, direction]).tolist()
 
 
-def test_cells_with_movement():
+def test_multiple_genomes_interaction2():
     state_size = 4
     action_size = 2
     output_size = state_size + action_size
@@ -413,3 +413,57 @@ def test_two_phase_is_order_invariant():
     pos1 = np.stack([c.position for c in w1.cells], axis=0)
     pos2 = np.stack([c.position for c in w2.cells], axis=0)
     np.testing.assert_allclose(pos1, pos2, atol=1e-12)
+
+
+class PassthroughGenome:
+    """Returns zeros; we only care about sense() layout in this test."""
+
+    def activate(self, inputs):
+        return np.zeros(8, dtype=float)
+
+
+def test_input_appends_mask_and_count():
+    # 2D, S=4, K=3 neighbors
+    S, K = 4, 3
+    interp = SlotBasedInterpreter({"state": slice(0, S), "move": slice(S, S + 2)})
+    cells = [
+        Cell(
+            [0.0, 0.0],
+            PassthroughGenome(),
+            state_size=S,
+            interpreter=interp,
+            max_neighbors=K,
+        ),
+        Cell(
+            [1.0, 0.0],
+            PassthroughGenome(),
+            state_size=S,
+            interpreter=interp,
+            max_neighbors=K,
+        ),
+        Cell(
+            [2.0, 0.0],
+            PassthroughGenome(),
+            state_size=S,
+            interpreter=interp,
+            max_neighbors=K,
+        ),
+    ]
+    w = World(cells)
+    # Take center cell's inputs
+    neighbors = w.get_neighbors(cells[1], radius=10.0)
+    x = cells[1].sense(neighbors)
+
+    pos_dim = 2
+    base = pos_dim + S
+    per_nb = pos_dim + S
+    expected_min = base + K * per_nb  # padded blocks
+    # time features unknown here -> ignore; we only assert the final tail exists
+    assert len(x) >= expected_min + K + 1  # +mask(K) +num_neighbors(1)
+
+    mask = x[-(K + 1) : -1]
+    num = int(x[-1])
+    # There are 2 neighbors within radius in this line (left & right)
+    assert num == 2
+    assert list(mask)[:2] == [1.0, 1.0]
+    assert list(mask)[2] == 0.0
