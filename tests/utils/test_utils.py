@@ -102,19 +102,6 @@ def _unique_exp_dir(root: pathlib.Path, base_name: str) -> pathlib.Path:
         i += 1
 
 
-import importlib
-import json
-
-# ---------- Factory ----------
-# tests/utils/test_utils.py（差分のみ）
-import os  # re 追加
-import pathlib
-import re
-import uuid
-
-# ...（中略）...
-
-
 def _unique_exp_dir(root: pathlib.Path, base_name: str) -> pathlib.Path:
     """Create a unique experiment directory under root using base_name."""
     # Keep it filesystem-safe and not too long
