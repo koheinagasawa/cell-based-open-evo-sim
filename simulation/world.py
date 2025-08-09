@@ -1,15 +1,50 @@
+import hashlib
+import struct
+
 import numpy as np
 
 
 class World:
     supported_actions = ["move"]
 
-    def __init__(self, cells):
+    def __init__(self, cells, seed: int | None = None):
         """
-        Initialize the world with a list of Cell objects.
+        :param seed: master seed for reproducible experiments. If None, use 0.
         """
         self.cells = cells
         self.time = 0
+        self.seed = int(seed) if seed is not None else 0
+
+        # Attach per-cell RNGs deterministically (order-invariant).
+        self._attach_rng_to_cells(self.cells)
+
+    # --- RNG wiring ----------------------------------------------------------
+    @staticmethod
+    def _stable_spawn_key_from_cell(cell, quant: float = 1e6):
+        """
+        Build a deterministic spawn_key from immutable attributes (initial position, state size).
+        Do NOT use Python's hash() due to per-process randomization.
+        """
+        pos = np.asarray(cell.position, dtype=float)
+        coords = [int(round(float(x) * quant)) for x in pos.tolist()]
+        state_sz = int(getattr(cell, "state_size", 0))
+        payload = ("pos:" + ",".join(map(str, coords)) + f"|S:{state_sz}").encode(
+            "utf-8"
+        )
+        digest = hashlib.sha256(payload).digest()
+        # Take first 5x32-bit words as spawn_key
+        k = struct.unpack("!5I", digest[:20])
+        return k
+
+    def _attach_rng_to_cells(self, cells):
+        for cell in cells:
+            spawn_key = self._stable_spawn_key_from_cell(cell)
+            ss = np.random.SeedSequence(self.seed, spawn_key=spawn_key)
+            cell.rng = np.random.default_rng(ss)
+
+    def add_cell(self, cell):
+        self._attach_rng_to_cells([cell])
+        self.cells.append(cell)
 
     def get_neighbors(self, target_cell, radius=10.0):
         """

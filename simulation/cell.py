@@ -15,6 +15,7 @@ class Cell:
         max_neighbors=4,
         include_neighbor_mask=True,
         include_num_neighbors=True,
+        **kwargs
     ):
         self.id = id or str(uuid.uuid4())
         self.position = np.array(position, dtype=float)
@@ -35,6 +36,8 @@ class Cell:
         self.age = 0
         self.raw_output = None  # Last raw output vector from genome
         self.output_slots = {}  # Interpreted output dictionary (e.g. "move", "state")
+
+        self.rng = None  # will be injected by World
 
     def sense(self, neighbors):
         """
@@ -111,8 +114,17 @@ class Cell:
         """
         Generate outputs using the genome network and provided inputs.
         The outputs are interpreted by the interpreter and used to update Cell's internal states.
+        Pass cell-local RNG if supported.
         """
-        self.raw_output = self.genome.activate(inputs)
+        try:
+            self.raw_output = self.genome.activate(inputs, rng=self.rng)
+        except TypeError:
+            if hasattr(self.genome, "set_rng"):
+                self.genome.set_rng(self.rng)
+            elif hasattr(self.genome, "rng"):
+                self.genome.rng = self.rng
+            self.raw_output = self.genome.activate(inputs)
+
         if self.interpreter:
             slots = self.interpreter.interpret(self.raw_output)
             self.output_slots = slots
