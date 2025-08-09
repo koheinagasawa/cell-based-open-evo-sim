@@ -4,6 +4,17 @@ import struct
 import numpy as np
 
 
+def _align_vec(vec, target_dim: int) -> np.ndarray:
+    """Align a 1-D vector to target_dim by right-padding zeros or truncation."""
+    a = np.asarray(vec, dtype=float).ravel()
+    n = a.shape[0]
+    if n == target_dim:
+        return a
+    if n < target_dim:
+        return np.pad(a, (0, target_dim - n), mode="constant")
+    return a[:target_dim]
+
+
 class World:
     supported_actions = ["move"]
 
@@ -107,8 +118,9 @@ class World:
         self.time += 1
 
     def apply_move(self, cell, delta):
-        # Apply a displacement vector to the cell's position
-        cell.position += np.array(delta)
+        # Make 'delta' match the dimensionality of the cell position.
+        d = _align_vec(delta, int(cell.position.shape[0]))
+        cell.position += d
 
     def noop(self, cell, value):
         # No-op action handler

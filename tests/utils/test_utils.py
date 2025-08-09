@@ -308,6 +308,34 @@ def _to_serializable(obj):
     return obj
 
 
+# ---- helper: group positions by cell in 2D ---------------------------------
+def _positions_by_cell_2d(recorder):
+    """Return {cell_id: (T, X, Y)} sorted by time from recorder.positions rows."""
+    from collections import defaultdict
+
+    import numpy as np
+
+    rows = getattr(recorder, "positions", None) or []
+    by_cell = defaultdict(list)
+    for row in rows:
+        if len(row) < 4:
+            continue
+        t = int(row[0])
+        cid = row[1]
+        x = float(row[2])
+        y = float(row[3])
+        by_cell[cid].append((t, x, y))
+
+    out = {}
+    for cid, lst in by_cell.items():
+        lst.sort(key=lambda z: z[0])
+        T = np.array([t for t, _, _ in lst], dtype=int)
+        X = np.array([x for _, x, _ in lst], dtype=float)
+        Y = np.array([y for _, _, y in lst], dtype=float)
+        out[cid] = (T, X, Y)
+    return out
+
+
 def plot_state_trajectories(recorder, show=True):
     """Plot per-cell state time series from recorder.states (list of [t, cell_id, *state])."""
     from collections import defaultdict
@@ -404,3 +432,99 @@ def plot_2D_position_trajectories(
     fig.tight_layout()
     if show:
         plt.show()
+
+
+def plot_quiver_last_step(recorder, show=True, equal_aspect=True, scale=None):
+    """Plot one arrow per cell using the last step velocity.
+    Requires at least two position samples per cell.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    data = _positions_by_cell_2d(recorder)
+    if not data:
+        print("No position data to plot.")
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    pxs, pys, us, vs = [], [], [], []
+
+    for cid, (T, X, Y) in data.items():
+        if X.size >= 2:
+            # trajectory (optional thin line for context)
+            ax.plot(X, Y, linewidth=1.0)
+            # last-step arrow
+            dx, dy = X[-1] - X[-2], Y[-1] - Y[-2]
+            pxs.append(X[-1])
+            pys.append(Y[-1])
+            us.append(dx)
+            vs.append(dy)
+
+    if pxs:
+        ax.quiver(
+            np.array(pxs),
+            np.array(pys),
+            np.array(us),
+            np.array(vs),
+            angles="xy",
+            scale_units="xy",
+            scale=scale,
+        )
+
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(True, alpha=0.3)
+    if equal_aspect:
+        ax.set_aspect("equal", adjustable="box")
+    if show:
+        plt.show()
+    return fig, ax
+
+
+def plot_quiver_along_trajectories(
+    recorder, arrow_stride=3, show=True, equal_aspect=True, scale=None
+):
+    """Plot multiple arrows along each trajectory (every `arrow_stride` steps).
+    Arrow at step i represents the displacement from i-1 to i.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    data = _positions_by_cell_2d(recorder)
+    if not data:
+        print("No position data to plot.")
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    pxs, pys, us, vs = [], [], [], []
+    stride = max(int(arrow_stride), 1)
+
+    for cid, (T, X, Y) in data.items():
+        ax.plot(X, Y, linewidth=1.0)  # path for context
+        if X.size < 2:
+            continue
+        for i in range(1, X.size, stride):
+            pxs.append(X[i - 1])
+            pys.append(Y[i - 1])
+            us.append(X[i] - X[i - 1])
+            vs.append(Y[i] - Y[i - 1])
+
+    if pxs:
+        ax.quiver(
+            np.array(pxs),
+            np.array(pys),
+            np.array(us),
+            np.array(vs),
+            angles="xy",
+            scale_units="xy",
+            scale=scale,
+        )
+
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(True, alpha=0.3)
+    if equal_aspect:
+        ax.set_aspect("equal", adjustable="box")
+    if show:
+        plt.show()
+    return fig, ax

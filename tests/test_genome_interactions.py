@@ -181,3 +181,5 @@ def test_multiple_genomes_interaction2(interpreter4, run_env_factory):
 
     tu.plot_state_trajectories(recorder, True)
     tu.plot_2D_position_trajectories(recorder, True)
+    # tu.plot_quiver_last_step(recorder, True)
+    # tu.plot_quiver_along_trajectories(recorder, True)

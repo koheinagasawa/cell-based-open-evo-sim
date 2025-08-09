@@ -39,6 +39,11 @@ class Cell:
 
         self.rng = None  # will be injected by World
 
+    @property
+    def pos_dim(self) -> int:
+        """Dimensionality of the position vector."""
+        return int(self.position.shape[0])
+
     def sense(self, neighbors):
         """
         Build a fixed-length input vector in the following order (2D example):
