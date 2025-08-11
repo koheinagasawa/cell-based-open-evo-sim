@@ -143,6 +143,48 @@ def world_line_factory(world_factory, interpreter4, positions_line):
 
 
 @pytest.fixture
+def world_random_factory(world_factory: Callable[..., World]):
+    """Build a world with N cells placed uniformly at random in a box."""
+
+    def _make(
+        *,
+        n: int = 80,
+        box=(-5.0, 5.0, -5.0, 5.0),  # (xmin, xmax, ymin, ymax)
+        seed: int = 123,
+        state_size: int = 4,
+        genome_builder: Callable[[int], object],
+        actions: Optional[Dict[str, Callable]] = None,
+        **world_kwargs,
+    ) -> World:
+        rng = np.random.default_rng(seed)
+        xs = rng.uniform(box[0], box[1], size=n)
+        ys = rng.uniform(box[2], box[3], size=n)
+
+        S = state_size
+        interp = SlotBasedInterpreter({"state": slice(0, S), "move": slice(S, S + 2)})
+
+        cells: Sequence[Cell] = [
+            Cell(
+                position=[float(xs[i]), float(ys[i])],
+                genome=genome_builder(i),
+                state_size=S,
+                interpreter=interp,
+                energy_init=1.0,
+                energy_max=1.0,
+            )
+            for i in range(n)
+        ]
+        return world_factory(
+            cells,
+            seed=seed,
+            actions=actions,
+            **world_kwargs,  # pass policies here
+        )
+
+    return _make
+
+
+@pytest.fixture
 def interpreter_factory():
     """Create a SlotBasedInterpreter for arbitrary (state_size, action_size)."""
 
