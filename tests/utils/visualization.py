@@ -1,10 +1,12 @@
+from collections import defaultdict
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+
 # ---- helper: group positions by cell in 2D ---------------------------------
 def _positions_by_cell_2d(recorder):
     """Return {cell_id: (T, X, Y)} sorted by time from recorder.positions rows."""
-    from collections import defaultdict
-
-    import numpy as np
-
     rows = getattr(recorder, "positions", None) or []
     by_cell = defaultdict(list)
     for row in rows:
@@ -28,11 +30,6 @@ def _positions_by_cell_2d(recorder):
 
 def plot_state_trajectories(recorder, show=True):
     """Plot per-cell state time series from recorder.states (list of [t, cell_id, *state])."""
-    from collections import defaultdict
-
-    import matplotlib.pyplot as plt
-    import numpy as np
-
     rows = getattr(recorder, "states", None) or []
     if not rows:
         print("No state data to plot.")
@@ -41,7 +38,7 @@ def plot_state_trajectories(recorder, show=True):
     by_cell = defaultdict(list)
     for row in rows:
         t = int(row[0])
-        cid = row[1]
+        cid = row[1][:6]  # use first 6 chars for brevity
         s = np.asarray(row[2:], dtype=float)
         by_cell[cid].append((t, s))
 
@@ -78,10 +75,6 @@ def plot_2D_position_trajectories(
     recorder, show=True, mark_start_end=True, equal_aspect=True
 ):
     """Plot per-cell 2D position trajectories from recorder.positions (list of [t, cell_id, x, y, ...])."""
-    from collections import defaultdict
-
-    import matplotlib.pyplot as plt
-    import numpy as np
 
     rows = getattr(recorder, "positions", None) or []
     if not rows:
@@ -93,7 +86,7 @@ def plot_2D_position_trajectories(
         if len(row) < 4:  # need at least t, id, x, y
             continue
         t = int(row[0])
-        cid = row[1]
+        cid = row[1][:6]  # use first 6 chars for brevity
         x = float(row[2])
         y = float(row[3])
         by_cell[cid].append((t, x, y))
@@ -126,29 +119,34 @@ def plot_2D_position_trajectories(
 
 def plot_quiver_last_step(recorder, show=True, equal_aspect=True, scale=None):
     """Plot one arrow per cell using the last step velocity.
-    Requires at least two position samples per cell.
+    Legend matches other plot functions: one entry per cell id (first 6 chars).
     """
-    import matplotlib.pyplot as plt
-    import numpy as np
-
     data = _positions_by_cell_2d(recorder)
     if not data:
         print("No position data to plot.")
         return
 
     fig, ax = plt.subplots(figsize=(6, 6))
-    pxs, pys, us, vs = [], [], [], []
+    pxs, pys, us, vs, cs = [], [], [], [], []
 
-    for cid, (T, X, Y) in data.items():
-        if X.size >= 2:
-            # trajectory (optional thin line for context)
-            ax.plot(X, Y, linewidth=1.0)
-            # last-step arrow
-            dx, dy = X[-1] - X[-2], Y[-1] - Y[-2]
-            pxs.append(X[-1])
-            pys.append(Y[-1])
-            us.append(dx)
-            vs.append(dy)
+    for cid_full, (T, X, Y) in data.items():
+        if X.size < 2:
+            continue
+
+        # Use first 6 chars of the id, keep consistent with other plots
+        cid6 = str(cid_full)[:6]
+
+        # Draw trajectory line and record its color for the arrow
+        (line_handle,) = ax.plot(X, Y, linewidth=1.5, label=f"cell {cid6}")
+        color = line_handle.get_color()
+
+        # Prepare last-step arrow payload (end of trajectory)
+        dx, dy = X[-1] - X[-2], Y[-1] - Y[-2]
+        pxs.append(X[-1])
+        pys.append(Y[-1])
+        us.append(dx)
+        vs.append(dy)
+        cs.append(color)  # color arrows by the line color
 
     if pxs:
         ax.quiver(
@@ -159,13 +157,16 @@ def plot_quiver_last_step(recorder, show=True, equal_aspect=True, scale=None):
             angles="xy",
             scale_units="xy",
             scale=scale,
+            color=cs,  # per-cell color to match the line/legend
         )
 
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=8)  # same style as other plots
     if equal_aspect:
         ax.set_aspect("equal", adjustable="box")
+    fig.tight_layout()
     if show:
         plt.show()
     return fig, ax
@@ -175,29 +176,33 @@ def plot_quiver_along_trajectories(
     recorder, arrow_stride=3, show=True, equal_aspect=True, scale=None
 ):
     """Plot multiple arrows along each trajectory (every `arrow_stride` steps).
-    Arrow at step i represents the displacement from i-1 to i.
+    Legend matches other plot functions: one entry per cell id (first 6 chars).
     """
-    import matplotlib.pyplot as plt
-    import numpy as np
-
     data = _positions_by_cell_2d(recorder)
     if not data:
         print("No position data to plot.")
         return
 
     fig, ax = plt.subplots(figsize=(6, 6))
-    pxs, pys, us, vs = [], [], [], []
+    pxs, pys, us, vs, cs = [], [], [], [], []
     stride = max(int(arrow_stride), 1)
 
-    for cid, (T, X, Y) in data.items():
-        ax.plot(X, Y, linewidth=1.0)  # path for context
+    for cid_full, (T, X, Y) in data.items():
+        cid6 = str(cid_full)[:6]
+        # Draw the trajectory with label (legend comes from these lines)
+        (line_handle,) = ax.plot(X, Y, linewidth=1.5, label=f"cell {cid6}")
+        color = line_handle.get_color()
+
         if X.size < 2:
             continue
+
+        # Collect displacement arrows every 'stride' steps
         for i in range(1, X.size, stride):
             pxs.append(X[i - 1])
             pys.append(Y[i - 1])
             us.append(X[i] - X[i - 1])
             vs.append(Y[i] - Y[i - 1])
+            cs.append(color)  # color per arrow sample for this cell
 
     if pxs:
         ax.quiver(
@@ -208,13 +213,16 @@ def plot_quiver_along_trajectories(
             angles="xy",
             scale_units="xy",
             scale=scale,
+            color=cs,
         )
 
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=8)
     if equal_aspect:
         ax.set_aspect("equal", adjustable="box")
+    fig.tight_layout()
     if show:
         plt.show()
     return fig, ax
@@ -225,11 +233,6 @@ def plot_3d_position_trajectories(
     recorder, show=True, mark_start_end=True, equal_aspect=True
 ):
     """Draw 3D trajectories from recorder.positions rows: [t, cell_id, x, y, z, ...]."""
-    from collections import defaultdict
-
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
     rows = getattr(recorder, "positions", None) or []
     if not rows:
@@ -241,7 +244,7 @@ def plot_3d_position_trajectories(
         if len(row) < 5:
             continue
         t = int(row[0])
-        cid = row[1]
+        cid = row[1][:6]  # use first 6 chars for brevity
         x = float(row[2])
         y = float(row[3])
         z = float(row[4])
@@ -271,8 +274,6 @@ def plot_3d_position_trajectories(
 
     if equal_aspect and series:
         # Simple equal aspect: set symmetric limits around data centroid
-        import numpy as np
-
         allX = np.concatenate([s[1] for s in series])
         allY = np.concatenate([s[2] for s in series])
         allZ = np.concatenate([s[3] for s in series])
@@ -291,7 +292,5 @@ def plot_3d_position_trajectories(
 
     fig.tight_layout()
     if show:
-        import matplotlib.pyplot as plt
-
         plt.show()
     return fig, ax
