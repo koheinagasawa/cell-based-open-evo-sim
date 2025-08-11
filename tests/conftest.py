@@ -82,6 +82,7 @@ def world_factory() -> Callable[..., World]:
         actions: Optional[Dict[str, Callable]] = None,
         energy_policy: Any = None,
         reproduction_policy: Any = None,
+        lifecycle_policy: Any = None,
     ) -> World:
         return World(
             cells,
@@ -89,6 +90,7 @@ def world_factory() -> Callable[..., World]:
             actions=actions or {},
             energy_policy=energy_policy or tu.DummyEnergyPolicy(),
             reproduction_policy=reproduction_policy or tu.DummyBudPolicy(),
+            lifecycle_policy=lifecycle_policy,  # may be None (World falls back to _NoDeath)
         )
 
     return _factory

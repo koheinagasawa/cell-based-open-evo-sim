@@ -73,3 +73,25 @@ class SimpleBudding:
         )
         # RNG will be attached by the world; newborn does not pay maintenance this frame.
         spawn_fn(baby)
+
+
+@dataclass(frozen=True)
+class NoDeath:
+    """Lifecycle: never blocks acting; never removes."""
+
+    def can_act(self, cell) -> bool:
+        return True
+
+    def should_remove(self, cell) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
+class KillAtZero:
+    """Lifecycle: blocks acting at energy<=0 and removes at energy<=0."""
+
+    def can_act(self, cell) -> bool:
+        return cell.energy > 0.0
+
+    def should_remove(self, cell) -> bool:
+        return cell.energy <= 0.0

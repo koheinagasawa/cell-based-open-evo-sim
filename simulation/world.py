@@ -19,6 +19,23 @@ class BudPolicy(Protocol):
     ) -> None: ...
 
 
+class LifecyclePolicy(Protocol):
+    """Interface: lifecycle gating/removal policy."""
+
+    def can_act(self, cell) -> bool: ...
+    def should_remove(self, cell) -> bool: ...
+
+
+class _NoDeath:
+    """Fallback lifecycle policy used when none is provided."""
+
+    def can_act(self, cell) -> bool:
+        return True
+
+    def should_remove(self, cell) -> bool:
+        return False
+
+
 def _align_vec(vec, target_dim: int) -> np.ndarray:
     """Align a 1-D vector to target_dim by right-padding zeros or truncation."""
     a = np.asarray(vec, dtype=float).ravel()
@@ -41,6 +58,7 @@ class World:
         actions: Dict[str, Callable] | None = None,
         energy_policy: EnergyPolicy,
         reproduction_policy: BudPolicy,
+        lifecycle_policy: LifecyclePolicy | None = None,
     ):
         """
         :param seed: master seed for reproducible experiments. If None, use 0.
@@ -66,6 +84,8 @@ class World:
         # Policies (thin, swappable)
         self.energy_policy = energy_policy
         self.reproduction_policy = reproduction_policy
+        # Use provided lifecycle policy or a no-op fallback to keep behavior unchanged.
+        self.lifecycle_policy = lifecycle_policy or _NoDeath()
 
     # --- RNG wiring ----------------------------------------------------------
     @staticmethod
@@ -125,25 +145,29 @@ class World:
         Phase 1: Every cell senses and decides (no world mutation).
         Phase 2: Apply all actions at once (order-invariant).
         """
-        # -------- Phase 1: decide (no mutation to world state) --------
+        # -------- Phase 1: decide (no mutation to world state, only for cells allowed to act by lifecycle) --------
         intents = []
         for cell in self.cells:
-            neighbors = self.get_neighbors(cell)
-            cell.step(
-                neighbors
-            )  # computes raw_output/output_slots; may update internal state
+            if self.lifecycle_policy.can_act(cell):
+                neighbors = self.get_neighbors(cell)
+                cell.step(
+                    neighbors
+                )  # computes raw_output/output_slots; may update internal state
 
-            # Snapshot interpreted outputs to decouple from later mutations
-            snap = {}
-            for k, v in (cell.output_slots or {}).items():
-                # Convert lists/tuples to ndarray; copy ndarray to avoid aliasing
-                if isinstance(v, np.ndarray):
-                    snap[k] = v.copy()
-                elif isinstance(v, (list, tuple)):
-                    snap[k] = np.array(v, dtype=float)
-                else:
-                    snap[k] = v
-            intents.append((cell, snap))
+                # Snapshot interpreted outputs to decouple from later mutations
+                snap = {}
+                for k, v in (cell.output_slots or {}).items():
+                    # Convert lists/tuples to ndarray; copy ndarray to avoid aliasing
+                    if isinstance(v, np.ndarray):
+                        snap[k] = v.copy()
+                    elif isinstance(v, (list, tuple)):
+                        snap[k] = np.array(v, dtype=float)
+                    else:
+                        snap[k] = v
+                intents.append((cell, snap))
+            else:
+                # Skip acting; treat as producing no outputs this frame.
+                intents.append((cell, {}))
 
         # --------  Phase 2: apply actions (order-stable, using a spawn buffer) --------
         self._spawn_buffer = []
@@ -162,6 +186,14 @@ class World:
             drain = float(self.energy_policy.per_step(cell))
             if drain > 0.0:
                 cell.energy = max(0.0, min(cell.energy_max, float(cell.energy) - drain))
+
+        # --------  Phase 3.5: remove cells according to lifecycle (after maintenance) --------
+        if self.cells:
+            survivors = []
+            for cell in self.cells:
+                if not self.lifecycle_policy.should_remove(cell):
+                    survivors.append(cell)
+            self.cells = survivors
 
         # --------  Phase 4: attach newborns (they do NOT pay maintenance this frame) --------
         if self._spawn_buffer:

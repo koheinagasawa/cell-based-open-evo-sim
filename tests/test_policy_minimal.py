@@ -6,7 +6,7 @@ import numpy as np
 
 from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
-from simulation.policies import ConstantMaintenance, SimpleBudding
+from simulation.policies import ConstantMaintenance, KillAtZero, SimpleBudding
 
 
 def test_bud_and_maintenance_minimal(world_factory):
@@ -79,3 +79,51 @@ def test_bud_and_maintenance_minimal(world_factory):
     assert np.isclose(by_id2[baby.id].energy, 0.3)
     # Both cells' energy are below the bud gate, so no new cell was born
     assert len(w.cells) == 2
+
+
+# Validates: parent hits zero energy on Step 1 and is removed; newborn survives and did not pay maintenance.
+def test_kill_at_zero_removes_parent_newborn_survives(world_factory):
+    S = 4
+    interp = SlotBasedInterpreter(
+        {
+            "state": slice(0, S),
+            "move": slice(S, S + 2),
+            "bud": S + 2,
+        }
+    )
+
+    class AlwaysBud:
+        def __init__(self):
+            self.output_size = S + 3
+
+        def activate(self, inputs, rng=None):
+            return [0.0] * S + [0.0, 0.0] + [1.0]
+
+    parent = Cell(
+        [0.0, 0.0],
+        genome=AlwaysBud(),
+        state_size=S,
+        interpreter=interp,
+        energy_init=1.0,
+        energy_max=1.0,
+    )
+
+    # Make energy hit exactly zero after Step 1:
+    # start 1.0 -> bud cost 0.5 -> maintenance 0.5 -> 0.0
+    energy = ConstantMaintenance(maintenance=0.5)
+    repro = SimpleBudding(threshold=0.5, cost=0.5, init_energy=0.1, offset_sigma=0.0)
+
+    w = world_factory(
+        [parent],
+        seed=123,
+        energy_policy=energy,
+        reproduction_policy=repro,
+        lifecycle_policy=KillAtZero(),
+    )
+
+    w.step()
+
+    # Parent removed at zero; newborn remains and did NOT pay maintenance on birth step.
+    assert len(w.cells) == 1
+    baby = w.cells[0]
+    assert np.isclose(baby.energy, 0.1)
