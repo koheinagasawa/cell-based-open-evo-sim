@@ -3,7 +3,6 @@ import pytest
 
 from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
-from simulation.world import World
 
 
 class FirstNeighborChaserGenome2D:
@@ -52,7 +51,7 @@ def _interp(S, move_dim):
 
 
 @pytest.mark.parametrize("D", [2, 3])
-def test_two_phase_order_invariance_nd(D):
+def test_two_phase_order_invariance_nd(D, world_factory):
     S = 4
     interp = _interp(S, 2)  # genome outputs move(2); World will pad if D=3
 
@@ -82,7 +81,7 @@ def test_two_phase_order_invariance_nd(D):
     ]
     cells2 = list(reversed([c for c in cells1]))  # reversed order build
 
-    w1, w2 = World(cells1, seed=123), World(cells2, seed=123)
+    w1, w2 = world_factory(cells1, seed=123), world_factory(cells2, seed=123)
     w1.step()
     w2.step()
     p1 = np.stack([c.position for c in w1.cells])

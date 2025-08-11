@@ -1,7 +1,22 @@
 import hashlib
 import struct
+from typing import Any, Callable, Dict, Protocol
 
 import numpy as np
+
+
+class EnergyPolicy(Protocol):
+    """Interface: returns per-step basal energy drain for a given cell."""
+
+    def per_step(self, cell) -> float: ...
+
+
+class BudPolicy(Protocol):
+    """Interface: performs budding according to policy and spawns a newborn."""
+
+    def apply(
+        self, world, parent, value, spawn_fn: Callable[[object], None]
+    ) -> None: ...
 
 
 def _align_vec(vec, target_dim: int) -> np.ndarray:
@@ -16,18 +31,41 @@ def _align_vec(vec, target_dim: int) -> np.ndarray:
 
 
 class World:
-    supported_actions = ["move"]
+    supported_actions = ["move", "bud"]
 
-    def __init__(self, cells, seed: int | None = None):
+    def __init__(
+        self,
+        cells,
+        *,
+        seed: int | None = None,
+        actions: Dict[str, Callable] | None = None,
+        energy_policy: EnergyPolicy,
+        reproduction_policy: BudPolicy,
+    ):
         """
         :param seed: master seed for reproducible experiments. If None, use 0.
+
+        World depends on abstract policies injected via the constructor.
+        Do not import concrete policy classes here; keep this layer thin.
         """
         self.cells = cells
         self.time = 0
         self.seed = int(seed) if seed is not None else 0
 
-        # Attach per-cell RNGs deterministically (order-invariant).
-        self._attach_rng_to_cells(self.cells)
+        # Attach RNG to cells if your implementation supports it
+        if hasattr(self, "_attach_rng_to_cells"):
+            # Attach per-cell RNGs deterministically (order-invariant).
+            self._attach_rng_to_cells(self.cells)
+
+        # Order-stable spawn buffer; newborns are attached after maintenance
+        self._spawn_buffer = []
+
+        # Optional: allow action handler injection; otherwise use methods on this class
+        self.actions = actions or {}
+
+        # Policies (thin, swappable)
+        self.energy_policy = energy_policy
+        self.reproduction_policy = reproduction_policy
 
     # --- RNG wiring ----------------------------------------------------------
     @staticmethod
@@ -107,13 +145,29 @@ class World:
                     snap[k] = v
             intents.append((cell, snap))
 
-        # -------- Phase 2: apply (order-invariant) --------
+        # --------  Phase 2: apply actions (order-stable, using a spawn buffer) --------
+        self._spawn_buffer = []
         for cell, slots in intents:
             for action_key in self.supported_actions:
                 value = slots.get(action_key)
-                if value is not None:
-                    handler = getattr(self, f"apply_{action_key}", self.noop)
-                    handler(cell, value)
+                if value is None:
+                    continue
+                handler = self.actions.get(action_key) or getattr(
+                    self, f"apply_{action_key}", self.noop
+                )
+                handler(cell, value)
+
+        #  --------  Phase 3: per-step maintenance on existing cells only --------
+        for cell in self.cells:
+            drain = float(self.energy_policy.per_step(cell))
+            if drain > 0.0:
+                cell.energy = max(0.0, min(cell.energy_max, float(cell.energy) - drain))
+
+        # --------  Phase 4: attach newborns (they do NOT pay maintenance this frame) --------
+        if self._spawn_buffer:
+            for newborn in self._spawn_buffer:
+                self.add_cell(newborn)
+            self._spawn_buffer.clear()
 
         self.time += 1
 
@@ -121,6 +175,10 @@ class World:
         # Make 'delta' match the dimensionality of the cell position.
         d = _align_vec(delta, int(cell.position.shape[0]))
         cell.position += d
+
+    def apply_bud(self, cell, value):
+        """Delegate budding to the injected reproduction policy."""
+        self.reproduction_policy.apply(self, cell, value, self._spawn_buffer.append)
 
     def noop(self, cell, value):
         # No-op action handler

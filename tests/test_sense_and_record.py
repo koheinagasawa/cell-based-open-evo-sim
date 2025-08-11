@@ -1,9 +1,6 @@
 import numpy as np
-import pytest
 
-import tests.utils.visualization as visualization
 from simulation.cell import Cell
-from simulation.world import World
 
 
 def default_time_encoding(t):
@@ -27,7 +24,7 @@ class InputDependentGenome:
         return np.concatenate([base, offset]).tolist()
 
 
-def test_sense_neighbor_cells(interpreter4, run_env_factory):
+def test_sense_neighbor_cells(interpreter4, run_env_factory, world_factory):
     state_size = 4
     steps = 10
 
@@ -64,7 +61,7 @@ def test_sense_neighbor_cells(interpreter4, run_env_factory):
         ),
     ]
 
-    world = World(cells)
+    world = world_factory(cells)
     for t in range(steps):
         world.step()
         for i, cell in enumerate(cells):

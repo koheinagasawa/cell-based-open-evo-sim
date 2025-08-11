@@ -1,9 +1,7 @@
 import numpy as np
-import pytest
 
 import tests.utils.visualization as visualization
 from simulation.cell import Cell
-from simulation.world import World
 
 
 class ConstantGenome:
@@ -41,7 +39,9 @@ class NeighborEchoGenome:
         return echo + [0] * (self.output_size - self.state_size)
 
 
-def test_multiple_genomes_interaction(interpreter_factory, run_env_factory):
+def test_multiple_genomes_interaction(
+    interpreter_factory, run_env_factory, world_factory
+):
     state_size, action_size = 2, 2
     output_size, steps = state_size + action_size, 10
 
@@ -78,7 +78,7 @@ def test_multiple_genomes_interaction(interpreter_factory, run_env_factory):
         ),
     ]
 
-    world = World(cells)
+    world = world_factory(cells)
     for t in range(steps):
         world.step()
         for i, cell in enumerate(cells):
@@ -137,7 +137,7 @@ class DirectionalMemoryGenome:
         return np.concatenate([new_state, direction]).tolist()
 
 
-def test_multiple_genomes_interaction2(interpreter4, run_env_factory):
+def test_multiple_genomes_interaction2(interpreter4, run_env_factory, world_factory):
     state_size, action_size = 4, 2
     output_size, steps = state_size + action_size, 20
 
@@ -171,7 +171,7 @@ def test_multiple_genomes_interaction2(interpreter4, run_env_factory):
         ),
     ]
 
-    world = World(cells)
+    world = world_factory(cells)
     for t in range(steps):
         world.step()
         for cell in cells:

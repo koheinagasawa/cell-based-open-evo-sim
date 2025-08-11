@@ -1,7 +1,6 @@
 import numpy as np
 
 from simulation.cell import Cell
-from simulation.world import World
 from tests.utils.test_utils import _build_interpreter
 
 
@@ -14,14 +13,14 @@ class DummyGenome:
         return list(range(self.output_size))
 
 
-def test_cell_step_and_output_action(interpreter4):
+def test_cell_step_and_output_action(interpreter4, world_factory):
     """Verify that state/move slices are applied correctly for a single cell."""
     state_size, action_size = 4, 2
     g = DummyGenome(state_size + action_size)
     cell = Cell(
         position=[0, 0], genome=g, state_size=state_size, interpreter=interpreter4
     )
-    world = World([cell])
+    world = world_factory([cell])
     world.step()
 
     expected_state = np.array([0, 1, 2, 3])
@@ -30,7 +29,7 @@ def test_cell_step_and_output_action(interpreter4):
     assert np.array_equal(cell.position, [4, 5])
 
 
-def test_cell_step_and_output_action_via_config(run_env_factory):
+def test_cell_step_and_output_action_via_config(run_env_factory, world_factory):
     """Build the Interpreter from config (import path + kwargs) and verify slicing works."""
     state_size, action_size = 4, 2
 
@@ -61,7 +60,7 @@ def test_cell_step_and_output_action_via_config(run_env_factory):
     # 3) Run a single cell with that interpreter
     g = DummyGenome(state_size + action_size)
     cell = Cell(position=[0, 0], genome=g, state_size=state_size, interpreter=interp)
-    world = World([cell])
+    world = world_factory([cell])
     world.step()
 
     # 4) Assertions
@@ -70,7 +69,9 @@ def test_cell_step_and_output_action_via_config(run_env_factory):
     assert np.array_equal(cell.position, [4, 5])  # move slice = [4, 5]
 
 
-def test_multiple_cells_with_different_output_sizes(interpreter4, interpreter4_skip4):
+def test_multiple_cells_with_different_output_sizes(
+    interpreter4, interpreter4_skip4, world_factory
+):
     """Two cells with different interpreter mappings should both move per their mapping."""
     c1 = Cell(
         position=[0, 0], genome=DummyGenome(6), state_size=4, interpreter=interpreter4
@@ -82,7 +83,7 @@ def test_multiple_cells_with_different_output_sizes(interpreter4, interpreter4_s
         interpreter=interpreter4_skip4,
     )  # 4 + 3
 
-    world = World([c1, c2])
+    world = world_factory([c1, c2])
     world.step()
 
     assert np.array_equal(c1.position, [4, 5])

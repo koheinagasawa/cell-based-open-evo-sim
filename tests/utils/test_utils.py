@@ -6,9 +6,28 @@ import os
 import pathlib
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
+
+
+class DummyEnergyPolicy:
+    """Global basal metabolism for tests (default: no drain)."""
+
+    def __init__(self, maintenance: float = 0.0) -> None:
+        self.maintenance = float(maintenance)
+
+    def per_step(self, cell) -> float:
+        # Keep it trivial; tests can override with a custom policy if needed.
+        return self.maintenance
+
+
+class DummyBudPolicy:
+    """No-op budding policy: never spawns. Useful for tests that don't touch reproduction."""
+
+    def apply(self, world, parent, value, spawn_fn: Callable[[object], None]) -> None:
+        # Intentionally do nothing.
+        return
 
 
 @dataclass

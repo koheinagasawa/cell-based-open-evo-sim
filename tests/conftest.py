@@ -3,6 +3,7 @@ import pathlib
 import re
 import time
 import uuid
+from typing import Any, Callable, Dict, Optional, Sequence
 
 import numpy as np
 import pytest
@@ -62,7 +63,39 @@ def positions_line():
 
 
 @pytest.fixture
-def world_line_factory(interpreter4, positions_line):
+def world_factory() -> Callable[..., World]:
+    """Return a factory function that builds a World with optional overrides.
+
+    Usage:
+        w = world_factory(
+            [cell],
+            seed=123,
+            energy_policy=DummyEnergyPolicy(0.0),
+            reproduction_policy=DummyBudPolicy(),
+        )
+    """
+
+    def _factory(
+        cells: Sequence,
+        *,
+        seed: int = 0,
+        actions: Optional[Dict[str, Callable]] = None,
+        energy_policy: Any = None,
+        reproduction_policy: Any = None,
+    ) -> World:
+        return World(
+            cells,
+            seed=seed,
+            actions=actions or {},
+            energy_policy=energy_policy or tu.DummyEnergyPolicy(),
+            reproduction_policy=reproduction_policy or tu.DummyBudPolicy(),
+        )
+
+    return _factory
+
+
+@pytest.fixture
+def world_line_factory(world_factory, interpreter4, positions_line):
     """Factory that builds a World with three cells on a line.
 
     Parameters:
@@ -102,7 +135,7 @@ def world_line_factory(interpreter4, positions_line):
         if order == "reversed":
             cells = list(reversed(cells))
 
-        return World(cells, seed=seed)
+        return world_factory(cells, seed=seed)
 
     return make
 

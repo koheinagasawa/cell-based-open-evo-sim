@@ -3,7 +3,6 @@ import numpy as np
 import tests.utils.visualization as vis
 from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
-from simulation.world import World
 
 
 class Orbit3DGenome:
@@ -37,7 +36,7 @@ def _pos3(x, y, z):
     return [float(x), float(y), float(z)]
 
 
-def test_demo_3d_orbits(run_env_factory, tmp_path=None):
+def test_demo_3d_orbits(run_env_factory, world_factory, tmp_path=None):
     S, steps = 4, 120
     interp = _interp(S, 3)
 
@@ -62,7 +61,7 @@ def test_demo_3d_orbits(run_env_factory, tmp_path=None):
             interpreter=interp,
         ),
     ]
-    world = World(cells, seed=123)
+    world = world_factory(cells, seed=123)
 
     run_config, recorder = run_env_factory(
         {

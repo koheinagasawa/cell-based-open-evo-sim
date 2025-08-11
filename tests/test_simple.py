@@ -1,11 +1,7 @@
 from pathlib import Path
 
-import numpy as np
-
 from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
-from simulation.world import World
-from tests.utils.test_utils import prepare_run
 
 
 class NullGenome:
@@ -13,7 +9,7 @@ class NullGenome:
         return [0.5, 0.5, 0.5, 0.5, 0.0, 0.0]  # 4 state + 2 zero-move
 
 
-def test_simple_test_with_output_dir(run_env_factory):
+def test_simple_test_with_output_dir(run_env_factory, world_factory):
     state_size = 1
     action_size = 1
     steps = 5
@@ -39,7 +35,7 @@ def test_simple_test_with_output_dir(run_env_factory):
         state_size=state_size,
         interpreter=interpreter,
     )
-    world = World([cell])
+    world = world_factory([cell])
 
     for step in range(steps):
         world.step()

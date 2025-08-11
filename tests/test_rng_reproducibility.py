@@ -2,7 +2,6 @@ import numpy as np
 
 from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
-from simulation.world import World
 
 
 # Use a genome that consumes rng
@@ -22,7 +21,7 @@ def _interp(S=4):
     return SlotBasedInterpreter({"state": slice(0, S), "move": slice(S, S + 2)})
 
 
-def _make_world(seed, order="normal"):
+def _build_random_walk_cells(order="normal"):
     S = 4
     interp = SlotBasedInterpreter({"state": slice(0, S), "move": slice(S, S + 2)})
     g = RandomWalkGenome(state_size=S, sigma=0.5)
@@ -38,9 +37,7 @@ def _make_world(seed, order="normal"):
         Cell(position=[1.0, 0.0], genome=g, state_size=S, interpreter=interp),
         Cell(position=[2.0, 0.0], genome=g, state_size=S, interpreter=interp),
     ]
-    if order == "reversed":
-        cells = list(reversed(cells))
-    return World(cells, seed=seed)
+    return cells if order == "normal" else list(reversed(cells))
 
 
 def _stack_positions_sorted_by_xy(world):
@@ -52,9 +49,9 @@ def _stack_positions_sorted_by_xy(world):
     return arr[idx]
 
 
-def test_same_seed_same_result_regardless_of_order():
-    w1 = _make_world(1234, "normal")
-    w2 = _make_world(1234, "reversed")
+def test_same_seed_same_result_regardless_of_order(world_factory):
+    w1 = world_factory(_build_random_walk_cells("normal"), seed=1234)
+    w2 = world_factory(_build_random_walk_cells("reversed"), seed=1234)
     w1.step()
     w2.step()
     p1 = _stack_positions_sorted_by_xy(w1)
@@ -62,9 +59,9 @@ def test_same_seed_same_result_regardless_of_order():
     np.testing.assert_allclose(p1, p2, atol=1e-12)
 
 
-def test_different_seed_different_result():
-    w1 = _make_world(1111)
-    w2 = _make_world(2222)
+def test_different_seed_different_result(world_factory):
+    w1 = world_factory(_build_random_walk_cells(), seed=1111)
+    w2 = world_factory(_build_random_walk_cells(), seed=2222)
     w1.step()
     w2.step()
     assert not np.allclose(

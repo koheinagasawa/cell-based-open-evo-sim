@@ -15,6 +15,8 @@ class Cell:
         max_neighbors=4,
         include_neighbor_mask=True,
         include_num_neighbors=True,
+        energy_init: float = 1.0,
+        energy_max: float = 1.0,
         **kwargs
     ):
         self.id = id or str(uuid.uuid4())
@@ -32,6 +34,9 @@ class Cell:
         self.max_neighbors = int(max_neighbors)
         self.include_neighbor_mask = bool(include_neighbor_mask)
         self.include_num_neighbors = bool(include_num_neighbors)
+
+        self.energy_max = float(energy_max)
+        self.energy = float(energy_init)
 
         self.age = 0
         self.raw_output = None  # Last raw output vector from genome

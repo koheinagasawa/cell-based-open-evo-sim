@@ -2,7 +2,6 @@ import numpy as np
 
 from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
-from simulation.world import World
 
 
 class MoveXYOnly:
@@ -15,7 +14,7 @@ class MoveXYOnly:
         return [0.0] * self.S + [1.0, 2.0]  # move len=2
 
 
-def test_2d_move_in_3d_world_keeps_z():
+def test_2d_move_in_3d_world_keeps_z(world_factory):
     S = 4
     D = 3
     interp = SlotBasedInterpreter(
@@ -24,7 +23,7 @@ def test_2d_move_in_3d_world_keeps_z():
     cell = Cell(
         position=[0.0, 0.0, 5.0], genome=MoveXYOnly(S), state_size=S, interpreter=interp
     )
-    w = World([cell], seed=0)
+    w = world_factory([cell], seed=0)
     w.step()
     # Expect x+=1, y+=2, z unchanged
     np.testing.assert_allclose(cell.position, np.array([1.0, 2.0, 5.0]), atol=1e-12)
