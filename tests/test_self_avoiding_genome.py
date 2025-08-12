@@ -1,14 +1,11 @@
 import numpy as np
 
+import tests.utils.visualization as vis
 from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
 from simulation.policies import ConstantMaintenance, NoDeath
 from simulation.world import World
 from tests.utils.test_utils import DummyBudPolicy
-from tests.utils.visualization import (
-    plot_2D_position_trajectories,
-    plot_quiver_along_trajectories,
-)
 
 
 class SelfAvoidingGenome:
@@ -79,12 +76,18 @@ def test_swarm_runs_and_records(world_random_factory):
 
     r = R()
     r.positions = []
-    for _ in range(200):
+    for _ in range(20):
         w.step()
         for c in w.cells:
             r.positions.append(
                 [w.time, str(c.id), float(c.position[0]), float(c.position[1])]
             )
     # optional visual checks (keep show=False in tests)
-    # plot_2D_position_trajectories(r, show=True)
-    plot_quiver_along_trajectories(r, arrow_stride=5, show=True)
+    # vis.plot_2D_position_trajectories(r, show=True)
+    # vis.plot_quiver_along_trajectories(r, arrow_stride=5, show=True)
+    vis.animate_2D_position_trajectories(
+        r, tail=40, legend="outside", legend_cols=2, label_shorten=6
+    )
+    # vis.animate_quiver_2D(
+    #     r, tail_steps=6, interval=50, save_path="quiver.gif", blit=True
+    # )

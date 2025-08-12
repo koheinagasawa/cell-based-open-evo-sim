@@ -179,7 +179,7 @@ def test_multiple_genomes_interaction2(interpreter4, run_env_factory, world_fact
 
     recorder.save_all()
 
-    visualization.plot_state_trajectories(recorder, True)
-    visualization.plot_2D_position_trajectories(recorder, True)
+    # visualization.plot_state_trajectories(recorder, True)
+    # visualization.plot_2D_position_trajectories(recorder, True)
     # visualization.plot_quiver_last_step(recorder, True)
     # visualization.plot_quiver_along_trajectories(recorder, True)

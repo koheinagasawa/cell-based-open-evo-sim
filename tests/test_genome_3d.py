@@ -84,4 +84,4 @@ def test_demo_3d_orbits(run_env_factory, world_factory, tmp_path=None):
     zs = np.stack([row[4] for row in recorder.positions if row[1] == cells[0].id])
     assert np.std(zs) > 0.01
 
-    vis.plot_3d_position_trajectories(recorder, show=True)
+    # vis.plot_3d_position_trajectories(recorder, show=True)

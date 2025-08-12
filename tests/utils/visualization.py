@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.animation import FuncAnimation, PillowWriter
 
 
 # ---- helper: group positions by cell in 2D ---------------------------------
@@ -26,6 +29,26 @@ def _positions_by_cell_2d(recorder):
         Y = np.array([y for _, _, y in lst], dtype=float)
         out[cid] = (T, X, Y)
     return out
+
+
+def _timeline_union_2d(data: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]):
+    """Return sorted unique times across all cells. Robust to missing frames per cell."""
+    if not data:
+        return np.array([], dtype=int)
+    return np.unique(np.concatenate([T for (T, _, _) in data.values()]))
+
+
+def _axes_limits_from_data(
+    series_xy: list[tuple[np.ndarray, np.ndarray]], pad_ratio: float = 0.05
+):
+    """Compute static axes limits with a small margin to avoid jitter during animation."""
+    allX = np.concatenate([x for x, _ in series_xy])
+    allY = np.concatenate([y for _, y in series_xy])
+    xmin, xmax = float(allX.min()), float(allX.max())
+    ymin, ymax = float(allY.min()), float(allY.max())
+    span = max(xmax - xmin, ymax - ymin, 1e-9)
+    pad = span * pad_ratio
+    return (xmin - pad, xmax + pad, ymin - pad, ymax + pad)
 
 
 def plot_state_trajectories(recorder, show=True):
@@ -228,7 +251,6 @@ def plot_quiver_along_trajectories(
     return fig, ax
 
 
-# tests/viz/plot3d.py
 def plot_3d_position_trajectories(
     recorder, show=True, mark_start_end=True, equal_aspect=True
 ):
@@ -294,3 +316,319 @@ def plot_3d_position_trajectories(
     if show:
         plt.show()
     return fig, ax
+
+
+def animate_2D_position_trajectories(
+    recorder,
+    tail: int | None = None,
+    interval: int = 60,
+    equal_aspect: bool = True,
+    show: bool = True,
+    save_path: str | None = None,
+    dpi: int = 120,
+    blit: bool = True,
+    # Legend controls
+    legend: str | bool = "auto",  # one of {True, False, "auto", "inside", "outside"}
+    legend_cols: int = 1,
+    label_shorten: int | None = 8,
+):
+    """
+    Animate per-cell 2D trajectories over time from `recorder.positions`.
+
+    Parameters
+    ----------
+    recorder : object
+        Must expose `positions` as a list of rows `[t, cell_id, x, y, ...]`.
+    tail : int | None
+        If given, only the most recent `tail` points per cell are drawn (sliding window).
+    interval : int
+        Delay between frames in milliseconds.
+    equal_aspect : bool
+        Keep axes equal for geometric fidelity.
+    show : bool
+        Call `plt.show()` at the end.
+    save_path : str | None
+        If provided, save the animation. `.gif` uses PillowWriter; `.mp4` tries matplotlib's
+        default writer and falls back to GIF when unavailable.
+    dpi : int
+        Output DPI when saving.
+    blit : bool
+        Use blitting for performance. Some backends may require `blit=False`.
+    legend : {True, False, "auto", "inside", "outside"}
+        Control legend rendering. `auto` puts legend outside if there are many cells.
+    legend_cols : int
+        Number of columns when the legend is drawn.
+    label_shorten : int | None
+        If set, shorten cell IDs to first `label_shorten` chars to keep legend compact.
+
+    Returns
+    -------
+    (fig, anim) : matplotlib.figure.Figure, matplotlib.animation.FuncAnimation
+    """
+    data = _positions_by_cell_2d(recorder)
+    if not data:
+        print("No position data to animate.")
+        return None, None
+
+    times = _timeline_union_2d(data)
+
+    # Precompute axes range to avoid autoscale jitter
+    limits = _axes_limits_from_data([(X, Y) for (_, X, Y) in data.values()])
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_xlim(limits[0], limits[1])
+    ax.set_ylim(limits[2], limits[3])
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(True, alpha=0.3)
+    if equal_aspect:
+        ax.set_aspect("equal", adjustable="box")
+
+    # One line per cell
+    # Sort by id for stable color assignment across runs
+    artists: dict[str, dict] = {}
+    for cid, (T, X, Y) in sorted(data.items(), key=lambda kv: str(kv[0])):
+        label_cid = str(cid)
+        if (
+            isinstance(label_shorten, int)
+            and label_shorten > 0
+            and len(label_cid) > label_shorten
+        ):
+            label_cid = label_cid[:label_shorten]
+        (line,) = ax.plot([], [], linewidth=1.5, label=f"cell {label_cid}")
+        artists[cid] = {"line": line, "T": T, "X": X, "Y": Y}
+
+    # Legend policy
+    draw_legend = legend if isinstance(legend, bool) else True
+    loc_kwargs = {}
+    if legend in ("inside", True):
+        loc = "best"
+    elif legend == "outside" or (legend == "auto" and len(artists) > 8):
+        loc = "upper left"
+        loc_kwargs = {"bbox_to_anchor": (1.02, 1.0), "borderaxespad": 0.0}
+    elif legend == "auto":
+        loc = "best"
+    else:  # legend is False or "none"
+        draw_legend = False
+        loc = "best"
+
+    if draw_legend:
+        ax.legend(
+            loc=loc,
+            fontsize=8,
+            framealpha=0.85,
+            ncol=max(1, int(legend_cols)),
+            **loc_kwargs,
+        )
+
+    # Current head markers (scatter supports efficient .set_offsets)
+    head_scatter = ax.scatter([], [], s=28, marker="o")
+
+    # Build lookup: time -> index per cell (O(1) during updates)
+    idxmaps = {
+        cid: {int(t): i for i, t in enumerate(entry["T"])}
+        for cid, entry in artists.items()
+    }
+
+    def init():
+        for entry in artists.values():
+            entry["line"].set_data([], [])
+        head_scatter.set_offsets(np.empty((0, 2)))
+        return [entry["line"] for entry in artists.values()] + [head_scatter]
+
+    def update(frame_i: int):
+        t = int(times[frame_i])
+        heads = []
+        for cid, entry in artists.items():
+            idx = idxmaps[cid].get(t)
+            if idx is None:
+                continue  # no sample for this cell at time t
+            start = 0 if tail is None else max(0, idx + 1 - int(tail))
+            x = entry["X"][start : idx + 1]
+            y = entry["Y"][start : idx + 1]
+            entry["line"].set_data(x, y)
+            heads.append([entry["X"][idx], entry["Y"][idx]])
+        if heads:
+            head_scatter.set_offsets(np.asarray(heads))
+        return [entry["line"] for entry in artists.values()] + [head_scatter]
+
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=len(times),
+        init_func=init,
+        interval=int(interval),
+        blit=bool(blit),
+    )
+
+    if save_path:
+        try:
+            if save_path.lower().endswith(".gif"):
+                fps = max(1, int(round(1000.0 / max(1, interval))))
+                anim.save(save_path, writer=PillowWriter(fps=fps), dpi=int(dpi))
+            else:
+                # Try default writer (e.g., ffmpeg). If unavailable, fall back to GIF.
+                anim.save(save_path, dpi=int(dpi))
+        except Exception:
+            alt = save_path.rsplit(".", 1)[0] + ".gif"
+            fps = max(1, int(round(1000.0 / max(1, interval))))
+            anim.save(alt, writer=PillowWriter(fps=fps), dpi=int(dpi))
+            print(f"Saved as GIF instead: {alt}")
+
+    if show:
+        plt.show()
+    return fig, anim
+
+
+def animate_quiver_2D(
+    recorder,
+    tail_steps: int = 1,
+    interval: int = 60,
+    scale: float | None = None,
+    equal_aspect: bool = True,
+    show: bool = True,
+    save_path: str | None = None,
+    dpi: int = 120,
+    blit: bool = True,
+):
+    """
+    Animate per-step velocity arrows (quiver) for all cells.
+
+    Robustness tweaks
+    -----------------
+    * Keep a fixed-size quiver (Nmax = #cells * tail_steps) to avoid shape changes.
+    * Use masked arrays instead of NaNs so some Matplotlib backends don't choke
+      and GIF encoders actually register per-frame changes.
+    * **Also**: when `scale` is None we compute a finite default from the data so that
+      Matplotlib does not try to autoscale from an empty (fully masked) first frame,
+      which can yield NaN and produce a static-looking GIF.
+    * If your GIF still appears static, try `blit=False` when calling this.
+    """
+    data = _positions_by_cell_2d(recorder)
+    if not data:
+        print("No position data to animate (quiver).")
+        return None, None
+
+    times = _timeline_union_2d(data)
+    if len(times) <= 1:
+        print("Only a single frame present; nothing to animate.")
+        return None, None
+
+    limits = _axes_limits_from_data([(X, Y) for (_, X, Y) in data.values()])
+
+    # Prepare lookups per cell
+    cache = {}
+    for cid, (T, X, Y) in data.items():
+        cache[cid] = {
+            "T": T,
+            "X": X,
+            "Y": Y,
+            "idx": {int(t): i for i, t in enumerate(T)},
+        }
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_xlim(limits[0], limits[1])
+    ax.set_ylim(limits[2], limits[3])
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(True, alpha=0.3)
+    if equal_aspect:
+        ax.set_aspect("equal", adjustable="box")
+
+    # Optional faint full trajectories for context (kept subtle)
+    for cid, (T, X, Y) in data.items():
+        ax.plot(X, Y, linewidth=0.6, alpha=0.5)
+
+    # --- Determine a safe scale if none is provided ---
+    scale_used = scale
+    if scale_used is None:
+        mags = []
+        for T, X, Y in data.values():
+            if len(X) > 1:
+                dX = np.diff(X)
+                dY = np.diff(Y)
+                m = np.hypot(dX, dY)
+                if m.size:
+                    mags.append(np.median(m))
+        med = float(np.median(mags)) if mags else 1.0
+        # Larger scale -> shorter arrows when scale_units="xy"
+        scale_used = max(1e-6, med)
+
+    M = len(cache)
+    K = max(1, int(tail_steps))
+    Nmax = M * K
+
+    # Preallocate buffers
+    off = np.zeros((Nmax, 2), dtype=float)
+    U = np.zeros(Nmax, dtype=float)
+    V = np.zeros(Nmax, dtype=float)
+    mask = np.ones(Nmax, dtype=bool)  # True = hidden
+
+    # Create quiver once
+    quiv = ax.quiver(
+        off[:, 0],
+        off[:, 1],
+        U,
+        V,
+        angles="xy",
+        scale_units="xy",
+        scale=scale_used,
+        pivot="tail",
+    )
+
+    def init():
+        # Start fully masked (no arrows visible)
+        quiv.set_offsets(off)
+        quiv.set_UVC(np.ma.array(U, mask=mask), np.ma.array(V, mask=mask))
+        return [quiv]
+
+    def update(frame_i: int):
+        t = int(times[frame_i])
+        # Reset to hidden
+        mask[:] = True
+        k = 0
+        for cid, buf in cache.items():
+            idx = buf["idx"].get(t)
+            if idx is None or idx <= 0:
+                continue
+            j0 = max(1, idx + 1 - K)
+            for j in range(j0, idx + 1):
+                if k >= Nmax:
+                    break
+                x0, y0 = buf["X"][j - 1], buf["Y"][j - 1]
+                dx, dy = buf["X"][j] - x0, buf["Y"][j] - y0
+                off[k, 0] = x0
+                off[k, 1] = y0
+                U[k] = dx
+                V[k] = dy
+                mask[k] = False  # visible
+                k += 1
+        quiv.set_offsets(off)
+        quiv.set_UVC(np.ma.array(U, mask=mask), np.ma.array(V, mask=mask))
+        return [quiv]
+
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=len(times),
+        init_func=init,
+        interval=int(interval),
+        blit=bool(blit),
+    )
+
+    if save_path:
+        try:
+            if save_path.lower().endswith(".gif"):
+                fps = max(1, int(round(1000.0 / max(1, interval))))
+                anim.save(save_path, writer=PillowWriter(fps=fps), dpi=int(dpi))
+            else:
+                anim.save(save_path, dpi=int(dpi))
+        except Exception:
+            alt = save_path.rsplit(".", 1)[0] + ".gif"
+            fps = max(1, int(round(1000.0 / max(1, interval))))
+            anim.save(alt, writer=PillowWriter(fps=fps), dpi=int(dpi))
+            print(f"Saved as GIF instead: {alt}")
+
+    if show:
+        plt.show()
+    return fig, anim
