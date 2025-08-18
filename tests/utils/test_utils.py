@@ -224,6 +224,7 @@ class Recorder:
         # Buffers
         self.positions = []  # list of [t, cell_id, *pos]
         self.states = []  # list of [t, cell_id, *state]
+        self.births = []  # list of [t, parent_id, child_id, x, y, (z...)]
         self.raw_outputs = []  # optional; list of [t, cell_id, *raw]
         self.slot_stream = []  # jsonl of {"t":..., "cell_id":..., "slots": {...}}
 
@@ -249,6 +250,12 @@ class Recorder:
             self.slot_stream.append(
                 {"t": int(t), "cell_id": cid, "slots": _to_serializable(slots)}
             )
+
+    # --- Birth logging API ---
+    def record_birth(self, t: int, parent_id: str, child_id: str, pos) -> None:
+        """Append a birth event row. 'pos' may be 2D or 3D; we flatten."""
+        p = list(np.asarray(pos, dtype=float).ravel())
+        self.births.append([int(t), str(parent_id), str(child_id), *p])
 
     # --- Saving APIs ---------------------------------------------------------
 
@@ -288,6 +295,11 @@ class Recorder:
             np.save(
                 os.path.join(self.output_dir, "states.npy"),
                 np.asarray(self.states, dtype=object),
+            )
+        if self.births:
+            np.save(
+                os.path.join(self.output_dir, "births.npy"),
+                np.array(self.births, dtype=object),
             )
         if self.raw_outputs:
             np.save(
