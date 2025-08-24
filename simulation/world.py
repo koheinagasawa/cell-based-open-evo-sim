@@ -169,7 +169,14 @@ class World:
                 # Skip acting; treat as producing no outputs this frame.
                 intents.append((cell, {}))
 
-        # --------  Phase 2: apply actions (order-stable, using a spawn buffer) --------
+        # --------  Phase 2: commit state update after all cells have acted  --------
+        for cell in self.cells:
+            ns = getattr(cell, "next_state", None)
+            if ns is not None:
+                cell.update_state(ns)
+                cell.next_state = None
+
+        # --------  Phase 3: apply actions (order-stable, using a spawn buffer) --------
         self._spawn_buffer = []
         for cell, slots in intents:
             for action_key in self.supported_actions:
@@ -181,13 +188,13 @@ class World:
                 )
                 handler(cell, value)
 
-        #  --------  Phase 3: per-step maintenance on existing cells only --------
+        #  --------  Phase 4: per-step maintenance on existing cells only --------
         for cell in self.cells:
             drain = float(self.energy_policy.per_step(cell))
             if drain > 0.0:
                 cell.energy = max(0.0, min(cell.energy_max, float(cell.energy) - drain))
 
-        # --------  Phase 3.5: remove cells according to lifecycle (after maintenance) --------
+        # --------  Phase 4.5: remove cells according to lifecycle (after maintenance) --------
         if self.cells:
             survivors = []
             for cell in self.cells:
@@ -195,7 +202,7 @@ class World:
                     survivors.append(cell)
             self.cells = survivors
 
-        # --------  Phase 4: attach newborns (they do NOT pay maintenance this frame) --------
+        # --------  Phase 5: attach newborns (they do NOT pay maintenance this frame) --------
         if self._spawn_buffer:
             for newborn in self._spawn_buffer:
                 self.add_cell(newborn)

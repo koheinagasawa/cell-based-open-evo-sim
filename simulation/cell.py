@@ -29,6 +29,7 @@ class Cell:
         self.state = np.zeros(
             state_size, dtype=float
         )  # Abstract internal states of the cell
+        self.next_state = None  # defer state commit for two-phase update
         self.state_size = state_size
         self.time_encoding_fn = time_encoding_fn  # Optional time input encoder
 
@@ -166,7 +167,8 @@ class Cell:
             slots = self.interpreter.interpret(self.raw_output)
             self.output_slots = slots
             if "state" in slots:
-                self.state = np.array(slots["state"])
+                # Defer committing state to World.step() commit phase
+                self.next_state = np.array(slots["state"], dtype=float)
 
     def update_state(self, new_state):
         """Default behavior: overwrite internal state."""
