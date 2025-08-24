@@ -13,6 +13,7 @@ class Cell:
         interpreter=None,
         time_encoding_fn=None,
         max_neighbors=4,
+        neighbor_aggregation: str | None = None,  # {None,'mean','max'}
         include_neighbor_mask=True,
         include_num_neighbors=True,
         energy_init: float = 1.0,
@@ -34,6 +35,7 @@ class Cell:
         self.max_neighbors = int(max_neighbors)
         self.include_neighbor_mask = bool(include_neighbor_mask)
         self.include_num_neighbors = bool(include_num_neighbors)
+        self.neighbor_aggregation = neighbor_aggregation  # Aggregation mode
 
         self.energy_max = float(energy_max)
         self.energy = float(energy_init)
@@ -80,6 +82,8 @@ class Cell:
         mask = [0.0] * K
 
         # Fill existing neighbors
+        rels = []  # collect relative positions for aggregation
+        nstates = []  # collect neighbor states for aggregation
         for i, n in enumerate(sorted_neighbors):
             rel = (n.position - self.position).astype(float)
             # Safety: match dimensionality
@@ -98,6 +102,8 @@ class Cell:
                 else:
                     n_state = n_state[:S]
             input_vec += n_state.tolist()
+            rels.append(rel)
+            nstates.append(n.state.astype(float))
 
             mask[i] = 1.0
 
@@ -105,6 +111,27 @@ class Cell:
         missing = K - len(sorted_neighbors)
         if missing > 0:
             input_vec += [0.0] * missing * (pos_dim + S)
+
+        # Optional: aggregated neighbor summary (BEFORE mask/count tails)
+        if self.neighbor_aggregation is not None:
+            # NOTE: Only present neighbors are aggregated.
+            if len(rels) == 0:
+                input_vec += [0.0] * (pos_dim + S)
+            else:
+                R = np.stack(rels, axis=0)  # [N, pos_dim]
+                NS = np.stack(nstates, axis=0)  # [N, S]
+                mode = str(self.neighbor_aggregation).lower()
+                if mode == "mean":
+                    # NOTE: Pure arithmetic mean; no distance weighting.
+                    input_vec += R.mean(axis=0).tolist()
+                    input_vec += NS.mean(axis=0).tolist()
+                elif mode == "max":
+                    # NOTE: Element-wise max; not rotation invariant.
+                    input_vec += R.max(axis=0).tolist()
+                    input_vec += NS.max(axis=0).tolist()
+                else:
+                    # Unknown mode -> append zeros to keep shape deterministic.
+                    input_vec += [0.0] * (pos_dim + S)
 
         # Optional: time features (kept in the same place as before)
         if self.time_encoding_fn is not None:
