@@ -296,3 +296,30 @@ def test_connected_average_three_cells(interpreter4, world_factory):
     np.testing.assert_allclose(C1.state, [0.0, 0.5, 0.5, 0.0])
     np.testing.assert_allclose(C2.state, [0.5, 0.0, 0.5, 0.0])
     np.testing.assert_allclose(C3.state, [0.5, 0.5, 0.0, 0.0])
+
+
+class _G:
+    def activate(self, x):
+        return np.zeros(6, float)
+
+
+def test_sense_skips_spatial(interpreter4):
+    S, D = 4, 2
+    c = Cell(
+        [0, 0],
+        _G(),
+        state_size=S,
+        interpreter=interpreter4,
+        max_neighbors=0,
+        include_neighbor_mask=True,
+        include_num_neighbors=True,
+        recv_layout={"recv:a": 3, "recv:b": 1},
+    )
+    c.inbox["recv:a"] = np.array([9, 8, 7], float)
+    x = c.sense(neighbors=[("dummy", None)])  # neighbors should be ignored
+    # Last 4 (=3+1) are recv:a, recv:b
+    tail = x[-4:]
+    np.testing.assert_allclose(tail[:3], [9, 8, 7])  # recv:a
+    np.testing.assert_allclose(tail[3:], [0.0])  # recv:b are zero-padded
+    # Neighbor count is 0.0 (mask is zero-length since K=0)
+    assert 0.0 in x.tolist()

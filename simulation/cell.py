@@ -95,6 +95,40 @@ class Cell:
         # Base: self position + self state
         input_vec = [*self.position.tolist(), *self.state.tolist()]
 
+        # Fast bypass: when K == 0, skip all spatial-neighbor features entirely
+        if K == 0:
+            # Optional: time features (kept before mask/count)
+            if self.time_encoding_fn is not None:
+                tfeat = np.asarray(
+                    self.time_encoding_fn(self.age), dtype=float
+                ).tolist()
+                input_vec += tfeat
+
+            # Mask is zero-length when K==0; nothing to append.
+            if self.include_num_neighbors:
+                input_vec.append(0.0)
+
+            # Connected messaging tail (deterministic, fixed)
+            if self.recv_layout:
+                for key in sorted(self.recv_layout.keys()):
+                    dim = int(self.recv_layout[key])
+                    v = np.asarray(
+                        self.inbox.get(key, np.zeros(dim, dtype=float)), dtype=float
+                    ).ravel()
+                    out = np.zeros(dim, dtype=float)
+                    n = min(dim, v.size)
+                    if n > 0:
+                        out[:n] = v[:n]
+                    input_vec += out.tolist()
+
+            return np.asarray(input_vec, dtype=float)
+
+        # Clip neighbors to K and build blocks
+        sorted_neighbors = neighbors[:K]
+
+        # Track mask as float (1.0 present, 0.0 absent)
+        mask = [0.0] * K
+
         # Clip neighbors to K and build blocks
         sorted_neighbors = neighbors[:K]
 
