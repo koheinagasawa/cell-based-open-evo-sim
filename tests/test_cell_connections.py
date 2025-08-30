@@ -323,3 +323,142 @@ def test_sense_skips_spatial(interpreter4):
     np.testing.assert_allclose(tail[3:], [0.0])  # recv:b are zero-padded
     # Neighbor count is 0.0 (mask is zero-length since K=0)
     assert 0.0 in x.tolist()
+
+
+class AlphaMixRecvGenome:
+    """
+    Test-only genome:
+      next_state = (1 - alpha) * self_state + alpha * recv
+      emit the current self_state as 'emit:<key>' so neighbors can receive it next frame.
+    Assumes sense() builds inputs as:
+      [ self_pos(D), self_state(S), ..., recv:<key>(S) ]  # recv at the tail
+    """
+
+    def __init__(
+        self,
+        S: int,
+        D: int = 2,
+        key: str = "a",
+        alpha: float = 0.5,
+        fallback: str = "self",
+    ):
+        assert 0.0 <= alpha <= 1.0
+        assert fallback in ("self", "zero")
+        self.S, self.D = int(S), int(D)
+        self.key = str(key)
+        self.alpha = float(alpha)
+        self.fallback = fallback
+
+    def activate(self, inputs):
+        x = np.asarray(inputs, dtype=float).ravel()
+        self_state = x[self.D : self.D + self.S]
+        recv = x[-self.S :] if self.S > 0 else np.zeros(0, dtype=float)
+        if self.fallback == "self" and not np.any(recv):
+            recv = self_state
+        next_state = (1.0 - self.alpha) * self_state + self.alpha * recv
+        return {
+            "state": next_state,
+            "move": np.zeros(2, dtype=float),
+            f"emit:{self.key}": self_state,  # emit current state
+        }
+
+
+def test_alpha_mix_two_cells_symmetry(interpreter4, world_factory):
+    """
+    Two cells A<->B with equal weights, alpha=0.5, fallback='self'.
+    After two steps: each becomes the average of the other's initial state.
+    """
+    S, D, alpha = 4, 2, 0.5
+    g = AlphaMixRecvGenome(S=S, D=D, key="a", alpha=alpha, fallback="self")
+
+    A = Cell(
+        [-1.0, 0.0],
+        g,
+        state_size=S,
+        interpreter=interpreter4,
+        recv_layout={"recv:a": S},
+    )
+    B = Cell(
+        [+1.0, 0.0],
+        g,
+        state_size=S,
+        interpreter=interpreter4,
+        recv_layout={"recv:a": S},
+    )
+
+    A.state = np.array([1, 2, 3, 4], float)
+    B.state = np.array([10, 20, 30, 40], float)
+
+    # Wire both directions (weight 1.0)
+    A.set_connections([(B.id, 1.0)])
+    B.set_connections([(A.id, 1.0)])
+
+    w = _mk_world([A, B], world_factory)
+
+    # Step1: with fallback='self', states stay the same
+    w.step()
+    np.testing.assert_allclose(A.state, [1, 2, 3, 4])
+    np.testing.assert_allclose(B.state, [10, 20, 30, 40])
+
+    # Step2: convex mix with alpha=0.5 -> simple average of initial states
+    w.step()
+    np.testing.assert_allclose(
+        A.state, 0.5 * (np.array([1, 2, 3, 4]) + np.array([10, 20, 30, 40]))
+    )
+    np.testing.assert_allclose(
+        B.state, 0.5 * (np.array([1, 2, 3, 4]) + np.array([10, 20, 30, 40]))
+    )
+
+
+def test_alpha_contraction_rate(interpreter4, world_factory):
+    """
+    With symmetric links and fallback='self', the A-B state difference contracts by |1-2*alpha| per step (from step 2 onward).
+    Test alpha=0.25: after step2, diff = (1-2*alpha) * diff0 = 0.5 * diff0; after step4, diff = 0.5^3 * diff0.
+    """
+    S, D, alpha = 4, 2, 0.25
+    g = AlphaMixRecvGenome(S=S, D=D, key="a", alpha=alpha, fallback="self")
+
+    A = Cell(
+        [-1.0, 0.0],
+        g,
+        state_size=S,
+        interpreter=interpreter4,
+        recv_layout={"recv:a": S},
+    )
+    B = Cell(
+        [+1.0, 0.0],
+        g,
+        state_size=S,
+        interpreter=interpreter4,
+        recv_layout={"recv:a": S},
+    )
+
+    A.state = np.array([0, 0, 1, 0], float)
+    B.state = np.array([1, 0, 0, 0], float)
+
+    A.set_connections([(B.id, 1.0)])
+    B.set_connections([(A.id, 1.0)])
+
+    w = _mk_world([A, B], world_factory)
+
+    # Step1: fallback keeps states
+    w.step()
+    d0 = B.state - A.state  # initial difference
+
+    # Step2: diff = (1 - 2*alpha) * d0  -> for alpha=0.25, 0.5 * d0
+    w.step()
+    d2 = B.state - A.state
+    s2 = 1.0 - 2.0 * alpha
+    np.testing.assert_allclose(d2, s2 * d0, atol=1e-12)
+
+    # Step3: diff = (1 - 4*alpha + 2*alpha^2) * d0  -> for alpha=0.25, 0.125 * d0
+    w.step()
+    d3 = B.state - A.state
+    s3 = 1.0 - 4.0 * alpha + 2.0 * (alpha**2)
+    np.testing.assert_allclose(d3, s3 * d0, atol=1e-12)
+
+    # Step4: diff = (1 - 6*alpha + 8*alpha^2 - 2*alpha^3) * d0  -> for alpha=0.25, -0.03125 * d0
+    w.step()
+    d4 = B.state - A.state
+    s4 = 1.0 - 6.0 * alpha + 8.0 * (alpha**2) - 2.0 * (alpha**3)
+    np.testing.assert_allclose(d4, s4 * d0, atol=1e-12)
