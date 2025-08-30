@@ -13,6 +13,15 @@ class Interpreter(ABC):
         pass
 
 
+# --- Keyed Slots naming convention (minimal, non-enforced) -------------------
+# Reserved: "state"  (required when genome returns a dict)
+# Conventional keys seen today: "move", "bud_gate", etc. (project-specific)
+# Recommended for multi-cell I/O:
+#   - Outbound signals: "emit:<name>"  e.g., "emit:a", "emit:chem1"
+#   - Inbound  signals: "recv:<name>"  e.g., "recv:a", "recv:chem1"
+# These are NOT enforced here; we simply document the convention.
+
+
 class SlotBasedInterpreter(Interpreter):
     def __init__(self, slot_defs: dict[str, slice | int]):
         """
@@ -22,6 +31,14 @@ class SlotBasedInterpreter(Interpreter):
         self.slot_defs = slot_defs
 
     def interpret(self, output) -> dict:
+        """
+        Dict path:
+          - If `output` is a dict, pass it through (values -> np.asarray(float)).
+          - 'state' key is required (for two-phase commit).
+        Vector path:
+          - If `output` is a vector, slice it by slot_defs.
+          - slot_defs supports: int | slice | index array (list/tuple/ndarray).
+        """
         # 1) Dict passthrough: accept keyed slots directly from genome
         if isinstance(output, dict):
             out = {}
@@ -39,6 +56,11 @@ class SlotBasedInterpreter(Interpreter):
                 val = vec[sl]
             elif isinstance(sl, int):
                 val = vec[sl]
+            elif isinstance(sl, (list, tuple, np.ndarray)):
+                # Advanced indexing with an index array (1-D gather).
+                # NOTE: indices must be in-bounds; coerced to int.
+                idx = np.asarray(sl, dtype=int)
+                val = vec[idx]
             else:
                 raise TypeError(
                     f"Slot definition for key '{key}' must be int or slice, got {type(sl)}"
