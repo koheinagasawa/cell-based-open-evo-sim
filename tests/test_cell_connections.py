@@ -1,10 +1,13 @@
 # tests/test_cell_connections_m1.py
+import matplotlib.pyplot as plt
 import numpy as np
 
+import tests.utils.visualization as vis
 from simulation.cell import Cell
-from simulation.lifecycle import init_connections_copy
+from simulation.lifecycle import chain_inits, init_connections_copy, log_birth
 from simulation.messaging import MessageRouter
 from simulation.policies import ConstantMaintenance, SimpleBudding
+from tests.utils.test_utils import Recorder
 from visualization.introspection import (
     degree_stats,
     export_connections_dot,
@@ -497,7 +500,7 @@ def test_birth_hook_inherits_connections(world_factory, interpreter4):
             child.state = parent.state.copy()
             spawn_fn(child)  # append via world’s spawn buffer
             if callable(self.on_birth):
-                self.on_birth(parent, child)
+                self.on_birth(parent, child, world)
             self._done = True
 
     class _ZeroG:
@@ -584,3 +587,96 @@ def test_export_dot_and_stats(interpreter4):
     assert st[A.id]["out_deg"] == 2 and st[A.id]["in_deg"] == 0
     assert st[B.id]["in_deg"] == 2 and st[B.id]["out_deg"] == 0
     assert st[B.id]["in_w"] == 0.9 + 0.5
+
+
+def test_budding_logs_birth_and_draws_arrows(world_factory, interpreter4):
+    # --- Small helper genomes ----------------------------------------------------
+    class BudOnceGenome:
+        """Emit 'bud' exactly once; keeps other slots zero."""
+
+        def __init__(self, S=4):
+            self.S, self._done = S, False
+
+        def activate(self, inputs):
+            out = {"state": np.zeros(self.S, float), "move": np.zeros(2, float)}
+            if not self._done:
+                out["bud"] = np.array([1.0], float)  # trigger budding once
+                self._done = True
+            return out
+
+    class ZeroGenome:
+        """No reproduction; zeros everywhere."""
+
+        def __init__(self, S=4):
+            self.S = S
+
+        def activate(self, inputs):
+            return {"state": np.zeros(self.S, float), "move": np.zeros(2, float)}
+
+    # --- Spy wrapper that uses the real Recorder but records calls safely --------
+    class SpyRecorder:
+        """Wrap an existing Recorder-like object; spy on record_birth calls."""
+
+        def __init__(self, real_recorder):
+            self.real = real_recorder
+            self.calls = []
+
+        def record_birth(self, t, parent_id, child_id, pos):
+            # Forward to the real recorder (project's Recorder) then remember the call
+            self.real.record_birth(t, parent_id, child_id, pos)
+            self.calls.append((int(t), str(parent_id), str(child_id)))
+
+    # Build cells: A will bud once; B is just a neighbor.
+    A = Cell([-1.0, 0.0], BudOnceGenome(4), "1", state_size=4, interpreter=interpreter4)
+    B = Cell([+1.0, 0.0], ZeroGenome(4), "2", state_size=4, interpreter=interpreter4)
+
+    # Parent's outgoing edge A -> B (weight 0.9)
+    A.set_connections({B.id: 0.9})
+
+    spy = SpyRecorder(Recorder())
+
+    # Compose init_child: copy parent's connections to child, and log birth via Recorder
+    init = chain_inits(
+        init_connections_copy,  # child.conn_out = parent.conn_out (copy)
+        log_birth(spy),  # spy -> calls real Recorder.record_birth(...)
+    )
+
+    # World with SimpleBudding that uses our init_child; router not required but harmless
+    repro = SimpleBudding(init_child=init)
+    w = world_factory(
+        [A, B],
+        energy_policy=ConstantMaintenance(0.0),
+        reproduction_policy=repro,
+        message_router=MessageRouter(),
+    )
+
+    # One step: A buds once; child is appended; init_child runs
+    w.step()
+
+    # Verify Recorder was called exactly once with correct parent id
+    assert len(spy.calls) == 1
+    t, pid, cid = spy.calls[0]
+    assert t == 0 and pid == A.id and cid != A.id
+
+    # The child is the last cell in the world's list
+    child = w.cells[-1]
+    # Check connections were copied to the child
+    assert child.conn_out == A.conn_out
+
+    # Visualization: draw connections and expect two arrows (A->B and child->B)
+    fig, ax = plt.subplots()
+    artists = vis.draw_connections(
+        ax,
+        w.cells,
+        show_nodes=True,
+        node_labels=True,
+        node_size=60,
+        weight_labels=True,
+        weight_fmt="{:.2f}",
+        min_abs_w=0.05,  # hide tiny edges
+        curve_bidirectional=True,  # A<->B を少し曲げて重なり解消
+        scale=1.2,
+        alpha=0.9,
+    )
+    assert len(artists) == 2
+    # plt.show()

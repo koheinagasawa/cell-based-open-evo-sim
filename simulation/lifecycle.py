@@ -4,9 +4,40 @@ from __future__ import annotations
 import numpy as np
 
 
+def log_birth(recorder):
+    """
+    Return an init_child function that records a birth using the given recorder.
+    Recorder must implement: record_birth(t, parent_id, child_id, pos)
+    """
+
+    def _init(child, parent, world):
+        try:
+            recorder.record_birth(world.time, parent.id, child.id, child.position)
+        except Exception:
+            # Logging must never break the simulation
+            pass
+
+    return _init
+
+
+def chain_inits(*inits):
+    """
+    Compose multiple init_child functions into one.
+    Each init: (child, parent, world) -> None
+    """
+
+    def _init(child, parent, world):
+        for f in inits:
+            if f:
+                f(child, parent, world)
+
+    return _init
+
+
 def init_connections_copy(
-    parent,
     child,
+    parent,
+    world,
     weight_noise_std: float = 0.0,
     clip_min: float | None = 0.0,
 ) -> None:

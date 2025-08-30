@@ -13,6 +13,16 @@ class DummyGenome:
         return list(range(self.output_size))
 
 
+def test_world_preserves_ids(world_factory, interpreter4):
+    a = Cell([0, 0], DummyGenome(6), state_size=4, interpreter=interpreter4, id="A")
+    b = Cell([1, 0], DummyGenome(6), state_size=4, interpreter=interpreter4, id="B")
+    ids_in = {a.id, b.id}
+    w = world_factory([a, b])
+    ids_world = {c.id for c in w.cells}
+    # IDs must match exactly
+    assert ids_world == ids_in
+
+
 def test_cell_step_and_output_action(interpreter4, world_factory):
     """Verify that state/move slices are applied correctly for a single cell."""
     state_size, action_size = 4, 2

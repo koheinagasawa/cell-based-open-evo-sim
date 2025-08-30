@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import Iterable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -632,3 +633,191 @@ def animate_quiver_2D(
     if show:
         plt.show()
     return fig, anim
+
+
+def draw_connections(
+    ax,
+    cells: Iterable["Cell"],
+    *,
+    # edge styling
+    scale: float = 1.0,
+    color=None,
+    alpha: float = 0.9,
+    arrows: bool = True,
+    # labeling / clarity
+    show_nodes: bool = False,
+    node_size: float = 40.0,
+    node_color="black",
+    node_labels: bool = True,
+    labeler: Optional[Callable[["Cell"], str]] = None,
+    weight_labels: bool = True,
+    weight_fmt: str = "{:.2g}",
+    min_abs_w: float = 0.0,
+    # curvature for A<->B
+    curve_bidirectional: bool = True,
+    curve_rad: float = 0.15,
+    # autoscale viewport
+    autoscale: bool = True,
+    pad_frac: float = 0.1,
+):
+    """
+    Draw directed connections on a Matplotlib Axes.
+    - 2D only: uses cell.position[:2]
+    - Line width is proportional to |weight| * scale
+    - Returns list of created artists for optional further styling
+    """
+    from matplotlib.patches import FancyArrowPatch
+
+    def _stable_color_for_id(sid: str):
+        """Map an id string to a stable color from tab20 palette."""
+        import matplotlib as mpl
+
+        palette = mpl.rcParams.get("axes.prop_cycle", None)
+        if hasattr(palette, "by_key"):
+            colors = palette.by_key().get("color", ["#1f77b4"])
+        else:
+            colors = ["#1f77b4"]
+        h = abs(hash(sid))
+        return colors[h % len(colors)]
+
+    def _short_id(sid: str, n: int = 4) -> str:
+        s = str(sid)
+        return s if len(s) <= n else s[-n:]
+
+    artists: List = []  # edge artists (returned)
+    text_artists: List = []  # node/weight labels (not returned)
+    pts = []  # collect endpoints for autoscale
+
+    cells_list = list(cells)
+    # Defensive: ensure unique ids (will raise early if duplicated)
+    reg = {c.id: c for c in cells_list}
+    if len(reg) != len(cells_list):
+        raise ValueError("Duplicate cell ids detected while drawing connections.")
+
+    # Prepare node positions (2D only)
+    xy = {}
+    for c in cells_list:
+        p = np.asarray(c.position, float).ravel()
+        if p.size >= 2:
+            xy[c.id] = (float(p[0]), float(p[1]))
+
+    # Optional: draw nodes first (so arrows overlay on top)
+    if show_nodes and xy:
+        xs, ys = zip(*xy.values())
+        node_cols = node_color
+        ax.scatter(xs, ys, s=node_size, c=node_cols, zorder=2.0)
+        if node_labels:
+            lab = labeler or (lambda cell: _short_id(cell.id))
+            # Slight offset for readability (in axes fraction units)
+            xspan = max(xs) - min(xs) if xs else 1.0
+            yspan = max(ys) - min(ys) if ys else 1.0
+            dx = 0.01 * (xspan if xspan > 0 else 1.0)
+            dy = 0.01 * (yspan if yspan > 0 else 1.0)
+            for c in cells_list:
+                if c.id in xy:
+                    x, y = xy[c.id]
+                    t = ax.text(
+                        x + dx,
+                        y + dy,
+                        lab(c),
+                        fontsize=9,
+                        color="black",
+                        ha="left",
+                        va="bottom",
+                        bbox=dict(
+                            boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.7
+                        ),
+                        zorder=3.0,
+                    )
+                    text_artists.append(t)
+
+    # Pre-compute reverse-edge existence for curvature
+    has_rev = set()
+    if curve_bidirectional:
+        for c in cells_list:
+            for dst_id in getattr(c, "conn_out", {}) or {}:
+                if dst_id in reg:
+                    if c.id in getattr(reg[dst_id], "conn_out", {}):
+                        has_rev.add((c.id, dst_id))
+
+    for src in reg.values():
+        if src.id not in xy:
+            continue  # skip non-2D
+        p = np.array(xy[src.id], float)
+        for dst_id, w in getattr(src, "conn_out", {}).items():
+            if abs(float(w)) < float(min_abs_w):
+                continue
+            dst = reg.get(dst_id)
+            if dst is None or dst.id not in xy:
+                continue  # unknown id; ignore silently (topology may be partial)
+            q = np.array(xy[dst.id], float)
+            pts.append((p[0], p[1]))
+            pts.append((q[0], q[1]))
+            lw = max(0.6, float(abs(w)) * float(scale) * 2.0)
+
+            # Edge color: use provided `color` or stable per-source color
+            col = color or _stable_color_for_id(src.id)
+
+            # Optional curvature for bidirectional pairs (A->B, B->A)
+            connectionstyle = "arc3"
+            if curve_bidirectional and (src.id, dst.id) in has_rev and src.id != dst.id:
+                rad = +curve_rad if str(src.id) < str(dst.id) else -curve_rad
+                connectionstyle = f"arc3,rad={rad}"
+            if arrows:
+                # Arrow with small shrink to avoid covering node markers
+                art = FancyArrowPatch(
+                    posA=(p[0], p[1]),
+                    posB=(q[0], q[1]),
+                    arrowstyle="-|>",
+                    mutation_scale=9.0,
+                    linewidth=lw,
+                    color=col,
+                    alpha=alpha,
+                    shrinkA=4.0,
+                    shrinkB=6.0,
+                    connectionstyle=connectionstyle,
+                    zorder=2.5,
+                )
+
+                ax.add_patch(art)
+                artists.append(art)
+            else:
+                (ln,) = ax.plot(
+                    [p[0], q[0]],
+                    [p[1], q[1]],
+                    linewidth=lw,
+                    color=col,
+                    alpha=alpha,
+                    zorder=2.5,
+                )
+                artists.append(ln)
+            # Weight label at mid-point (on straight line; good enough for small curvature)
+            if weight_labels:
+                mx, my = 0.5 * (p[0] + q[0]), 0.5 * (p[1] + q[1])
+                tt = ax.text(
+                    mx,
+                    my,
+                    weight_fmt.format(float(w)),
+                    fontsize=8,
+                    color="black",
+                    ha="center",
+                    va="center",
+                    bbox=dict(
+                        boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.7
+                    ),
+                    zorder=3.0,
+                )
+                text_artists.append(tt)
+
+    # Auto-fit axes to endpoints when requested
+    if autoscale and pts:
+        xs, ys = zip(*pts)
+        xmin, xmax = min(xs), max(xs)
+        ymin, ymax = min(ys), max(ys)
+        dx = max(1e-9, xmax - xmin)
+        dy = max(1e-9, ymax - ymin)
+        pad = pad_frac * max(dx, dy)
+        ax.set_xlim(xmin - pad, xmax + pad)
+        ax.set_ylim(ymin - pad, ymax + pad)
+        ax.set_aspect("equal", adjustable="box")
+    return artists
