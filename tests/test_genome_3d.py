@@ -5,28 +5,6 @@ from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
 
 
-class Orbit3DGenome:
-    """Minimal 3D demo genome: circular motion in XY + gentle Z oscillation.
-    Each cell instance keeps its own phase so please instantiate per-cell.
-    """
-
-    def __init__(self, state_size=4, amp_xy=0.3, amp_z=0.15, omega=0.2, phase=0.0):
-        self.S = int(state_size)
-        self.amp_xy = float(amp_xy)
-        self.amp_z = float(amp_z)
-        self.omega = float(omega)
-        self.phase = float(phase)
-        self.t = 0
-
-    def activate(self, inputs, rng=None):
-        # Parametric circle with a slow vertical component
-        dx = self.amp_xy * np.cos(self.omega * self.t + self.phase)
-        dy = self.amp_xy * np.sin(self.omega * self.t + self.phase)
-        dz = self.amp_z * np.sin(self.omega * self.t * 0.5 + self.phase)
-        self.t += 1
-        return [0.0] * self.S + [dx, dy, dz]  # move has 3 dims
-
-
 def _interp(S, move_dim):
     # Interpreter with 3-dim move slot
     return SlotBasedInterpreter({"state": slice(0, S), "move": slice(S, S + move_dim)})
@@ -36,7 +14,52 @@ def _pos3(x, y, z):
     return [float(x), float(y), float(z)]
 
 
+def test_2d_move_in_3d_world_keeps_z(world_factory):
+    class MoveXYOnly:
+        """Always moves +1 in x, +2 in y; no z component provided."""
+
+        def __init__(self, state_size):
+            self.S = state_size
+
+        def activate(self, inputs):
+            return [0.0] * self.S + [1.0, 2.0]  # move len=2
+
+    S = 4
+    D = 3
+    interp = SlotBasedInterpreter(
+        {"state": slice(0, S), "move": slice(S, S + 2)}
+    )  # move(2)
+    cell = Cell(
+        position=[0.0, 0.0, 5.0], genome=MoveXYOnly(S), state_size=S, interpreter=interp
+    )
+    w = world_factory([cell], seed=0)
+    w.step()
+    # Expect x+=1, y+=2, z unchanged
+    np.testing.assert_allclose(cell.position, np.array([1.0, 2.0, 5.0]), atol=1e-12)
+
+
 def test_demo_3d_orbits(run_env_factory, world_factory, tmp_path=None):
+    class Orbit3DGenome:
+        """Minimal 3D demo genome: circular motion in XY + gentle Z oscillation.
+        Each cell instance keeps its own phase so please instantiate per-cell.
+        """
+
+        def __init__(self, state_size=4, amp_xy=0.3, amp_z=0.15, omega=0.2, phase=0.0):
+            self.S = int(state_size)
+            self.amp_xy = float(amp_xy)
+            self.amp_z = float(amp_z)
+            self.omega = float(omega)
+            self.phase = float(phase)
+            self.t = 0
+
+        def activate(self, inputs, rng=None):
+            # Parametric circle with a slow vertical component
+            dx = self.amp_xy * np.cos(self.omega * self.t + self.phase)
+            dy = self.amp_xy * np.sin(self.omega * self.t + self.phase)
+            dz = self.amp_z * np.sin(self.omega * self.t * 0.5 + self.phase)
+            self.t += 1
+            return [0.0] * self.S + [dx, dy, dz]  # move has 3 dims
+
     S, steps = 4, 120
     interp = _interp(S, 3)
 
