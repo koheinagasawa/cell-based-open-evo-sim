@@ -36,10 +36,8 @@ class SlotBasedInterpreter(Interpreter):
         result = {}
         for key, sl in self.slot_defs.items():
             if isinstance(sl, slice):
-                val = output[sl]
                 val = vec[sl]
             elif isinstance(sl, int):
-                val = output[sl]
                 val = vec[sl]
             else:
                 raise TypeError(
