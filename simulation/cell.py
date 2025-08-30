@@ -16,9 +16,16 @@ class Cell:
         neighbor_aggregation: str | None = None,  # {None,'mean','max'}
         include_neighbor_mask=True,
         include_num_neighbors=True,
+        # Legacy spatial-neighbor features (to be phased out later):
+        # - max_neighbors:         upper bound for per-neighbor slots (0 disables)
+        # - include_neighbor_mask: append K-length mask for padded neighbors
+        # - include_num_neighbors: append neighbor count as a scalar tail
+        # - neighbor_aggregation:  {'mean','max'} summary BEFORE mask/count tails
+        # These are ignored once the input is built purely from connected messaging
+        # (i.e., recv:* aggregates). New experiments should prefer connected messaging.
         energy_init: float = 1.0,
         energy_max: float = 1.0,
-        **kwargs
+        **kwargs,
     ):
         self.id = id or str(uuid.uuid4())
         self.position = np.array(position, dtype=float)
@@ -32,6 +39,11 @@ class Cell:
         self.next_state = None  # defer state commit for two-phase update
         self.state_size = state_size
         self.time_encoding_fn = time_encoding_fn  # Optional time input encoder
+
+        # --- Static directed connections owned by this cell -----------------
+        # Store outgoing edges as {dst_id: weight}. Keep IDs (not object refs)
+        # to avoid stale references; resolve via an id->Cell registry when needed.
+        self.conn_out: dict[str, float] = {}
 
         self.max_neighbors = int(max_neighbors)
         self.include_neighbor_mask = bool(include_neighbor_mask)
@@ -180,3 +192,53 @@ class Cell:
         inputs = self.sense(neighbors)
         self.act(inputs)
         self.age += 1
+
+    # ----------------------- Connections API ----------------------------
+    def set_connections(self, edges) -> None:
+        """
+        Set outgoing connections from this cell.
+        Accepts any of:
+          - iterable of dst_id strings:        ["B", "C"]
+          - iterable of (dst_id, weight) pairs: [("B", 0.8), ("C", 0.2)]
+          - dict mapping:                       {"B": 0.8, "C": 0.2}
+        Last occurrence wins on duplicate keys.
+        """
+        bucket: dict[str, float] = {}
+        if hasattr(edges, "items"):
+            for k, w in edges.items():
+                bucket[str(k)] = float(w)
+        else:
+            for item in edges:
+                if isinstance(item, tuple) and len(item) == 2:
+                    k, w = item
+                    bucket[str(k)] = float(w)
+                else:
+                    bucket[str(item)] = 1.0
+        self.conn_out = bucket
+
+    def clear_connections(self) -> None:
+        """Remove all outgoing connections."""
+        self.conn_out.clear()
+
+    def connected_ids(self) -> list[str]:
+        """Return sorted destination IDs by (-weight, id) for determinism."""
+        return [k for k, _ in self._sorted_conn_items()]
+
+    def connected_pairs(
+        self, id_to_cell: dict[str, "Cell"]
+    ) -> list[tuple["Cell", float]]:
+        """
+        Resolve connections against a registry (id -> Cell).
+        Raises KeyError if any id is unknown.
+        """
+        out = []
+        for dst_id, w in self._sorted_conn_items():
+            try:
+                out.append((id_to_cell[dst_id], w))
+            except KeyError as e:
+                raise KeyError(f"Unknown dst id in Cell.connections: {dst_id}") from e
+        return out
+
+    def _sorted_conn_items(self) -> list[tuple[str, float]]:
+        """Internal: return [(dst_id, weight), ...] sorted by (-weight, id)."""
+        return sorted(self.conn_out.items(), key=lambda kv: (-kv[1], kv[0]))
