@@ -80,6 +80,7 @@ def world_factory() -> Callable[..., World]:
         *,
         seed: int = 0,
         actions: Optional[Dict[str, Callable]] = None,
+        message_router=None,
         energy_policy: Any = None,
         reproduction_policy: Any = None,
         lifecycle_policy: Any = None,
@@ -88,6 +89,7 @@ def world_factory() -> Callable[..., World]:
             cells,
             seed=seed,
             actions=actions or {},
+            message_router=message_router,
             energy_policy=energy_policy or tu.DummyEnergyPolicy(),
             reproduction_policy=reproduction_policy or tu.DummyBudPolicy(),
             lifecycle_policy=lifecycle_policy,  # may be None (World falls back to _NoDeath)

@@ -44,6 +44,13 @@ class Cell:
         # Store outgoing edges as {dst_id: weight}. Keep IDs (not object refs)
         # to avoid stale references; resolve via an id->Cell registry when needed.
         self.conn_out: dict[str, float] = {}
+        # --- Connected messaging ----------------------------------------
+        # Two-phase receive buffers (current frame inbox, and next-frame staging)
+        self.inbox: dict[str, np.ndarray] = {}  # key: 'recv:<name>' -> 1-D float array
+        self._next_inbox: dict[str, np.ndarray] = {}
+        # Expected layout for recv slots; ensures fixed input size.
+        # Example: {'recv:a': 2, 'recv:b': 4}
+        self.recv_layout: dict[str, int] = dict(kwargs.get("recv_layout", {}))
 
         self.max_neighbors = int(max_neighbors)
         self.include_neighbor_mask = bool(include_neighbor_mask)
@@ -157,6 +164,22 @@ class Cell:
             input_vec += mask
         if self.include_num_neighbors:
             input_vec.append(float(len(sorted_neighbors)))
+
+        # --- Connected messaging tail (deterministic, fixed) -----------------
+        # For each declared recv key (sorted by name), append a fixed-length vector.
+        # If inbox is missing the key, append zeros of the declared dimension.
+        if self.recv_layout:
+            for key in sorted(self.recv_layout.keys()):
+                dim = int(self.recv_layout[key])
+                v = np.asarray(
+                    self.inbox.get(key, np.zeros(dim, dtype=float)), dtype=float
+                ).ravel()
+                out = np.zeros(dim, dtype=float)
+                # copy up to dim (truncate or zero-pad)
+                n = min(dim, v.size)
+                if n > 0:
+                    out[:n] = v[:n]
+                input_vec += out.tolist()
 
         return np.asarray(input_vec, dtype=float)
 

@@ -56,6 +56,7 @@ class World:
         *,
         seed: int | None = None,
         actions: Dict[str, Callable] | None = None,
+        message_router=None,
         energy_policy: EnergyPolicy,
         reproduction_policy: BudPolicy,
         lifecycle_policy: LifecyclePolicy | None = None,
@@ -80,6 +81,8 @@ class World:
 
         # Optional: allow action handler injection; otherwise use methods on this class
         self.actions = actions or {}
+
+        self.message_router = message_router
 
         # Policies (thin, swappable)
         self.energy_policy = energy_policy
@@ -145,7 +148,7 @@ class World:
         # 2) Sense+Act for ALL cells (produce outputs; DO NOT mutate cell.state here)
         # 3) Commit: apply cell.next_state -> cell.state for ALL cells (synchronous state update)
         # 4) Reproduction, maintenance, deaths, time++ (project-specific policies)
-
+        # 5) Connected messaging routing (two-phase; affects NEXT frame)
         # -------- Phase 1: decide (no mutation to world state, only for cells allowed to act by lifecycle) --------
         intents = []
         for cell in self.cells:
@@ -189,13 +192,13 @@ class World:
                 )
                 handler(cell, value)
 
-        #  --------  Phase 4: per-step maintenance on existing cells only --------
+        #  --------  Phase 4.1: per-step maintenance on existing cells only --------
         for cell in self.cells:
             drain = float(self.energy_policy.per_step(cell))
             if drain > 0.0:
                 cell.energy = max(0.0, min(cell.energy_max, float(cell.energy) - drain))
 
-        # --------  Phase 4.5: remove cells according to lifecycle (after maintenance) --------
+        # --------  Phase 4.2: remove cells according to lifecycle (after maintenance) --------
         if self.cells:
             survivors = []
             for cell in self.cells:
@@ -203,11 +206,17 @@ class World:
                     survivors.append(cell)
             self.cells = survivors
 
-        # --------  Phase 5: attach newborns (they do NOT pay maintenance this frame) --------
+        # --------  Phase 4.3: attach newborns (they do NOT pay maintenance this frame) --------
         if self._spawn_buffer:
             for newborn in self._spawn_buffer:
                 self.add_cell(newborn)
             self._spawn_buffer.clear()
+
+        # --------  Phase 5: Connected messaging routing (two-phase; affects NEXT frame)) --------
+        if self.message_router is not None:
+            self.message_router.route_and_stage(self.cells)
+            # Commit staged inboxes for next frame
+            self.message_router.swap_inboxes(self.cells)
 
         self.time += 1
 
