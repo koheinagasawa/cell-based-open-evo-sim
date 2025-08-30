@@ -21,13 +21,26 @@ class SlotBasedInterpreter(Interpreter):
         """
         self.slot_defs = slot_defs
 
-    def interpret(self, output: np.ndarray) -> dict:
+    def interpret(self, output) -> dict:
+        # 1) Dict passthrough: accept keyed slots directly from genome
+        if isinstance(output, dict):
+            out = {}
+            for k, v in output.items():
+                out[k] = np.asarray(v, dtype=float)
+            if "state" not in out:
+                raise KeyError("Keyed output must include 'state'")
+            return out
+
+        # 2) Vector path: slice by slot_defs
+        vec = np.asarray(output, dtype=float)
         result = {}
         for key, sl in self.slot_defs.items():
             if isinstance(sl, slice):
                 val = output[sl]
+                val = vec[sl]
             elif isinstance(sl, int):
                 val = output[sl]
+                val = vec[sl]
             else:
                 raise TypeError(
                     f"Slot definition for key '{key}' must be int or slice, got {type(sl)}"
