@@ -7,12 +7,12 @@ from simulation.messaging import MessageRouter
 from simulation.policies import ConstantMaintenance, SimpleBudding
 
 
-class _ZeroG:
-    def activate(self, x):
-        return np.zeros(6, float)
-
-
 def _cells(interpreter4):
+
+    class _ZeroG:
+        def activate(self, x):
+            return np.zeros(6, float)
+
     g = _ZeroG()
     a = Cell([0, 0], g, state_size=4, interpreter=interpreter4)
     b = Cell([1, 0], g, state_size=4, interpreter=interpreter4)
@@ -37,32 +37,30 @@ def test_default_weight_and_order(interpreter4):
     assert ids == sorted([b.id, c.id])  # both 0.7 -> tie by id
 
 
-class EmitGenome:
-    """Writes 'emit:a' with a fixed 2D vector; keeps state unchanged."""
-
-    def __init__(self, S=4, v=(1.0, 2.0)):
-        self.S = S
-        self.v = np.array(v, float)
-
-    def activate(self, inputs):
-        # state(S) zeros + move(2) zeros (adapt to your interpreter schema)
-        out = np.zeros(self.S + 2, float)
-        return {"state": out[: self.S], "move": out[self.S :], "emit:a": self.v}
-
-
-class ReadGenome:
-    """Copies recv:a into state[0:2] for easy assertion."""
-
-    def __init__(self, S=4):
-        self.S = S
-
-    def activate(self, inputs):
-        # inputs tail contains recv:a (2 dim) per recv_layout
-        # Dummy: state = zeros except first 2 set to a small marker; we will check via sense route.
-        return {"state": np.zeros(self.S, float), "move": np.zeros(2, float)}
-
-
 def test_emit_route_recv(world_factory, interpreter4):
+    class EmitGenome:
+        """Writes 'emit:a' with a fixed 2D vector; keeps state unchanged."""
+
+        def __init__(self, S=4, v=(1.0, 2.0)):
+            self.S = S
+            self.v = np.array(v, float)
+
+        def activate(self, inputs):
+            # state(S) zeros + move(2) zeros (adapt to your interpreter schema)
+            out = np.zeros(self.S + 2, float)
+            return {"state": out[: self.S], "move": out[self.S :], "emit:a": self.v}
+
+    class ReadGenome:
+        """Copies recv:a into state[0:2] for easy assertion."""
+
+        def __init__(self, S=4):
+            self.S = S
+
+        def activate(self, inputs):
+            # inputs tail contains recv:a (2 dim) per recv_layout
+            # Dummy: state = zeros except first 2 set to a small marker; we will check via sense route.
+            return {"state": np.zeros(self.S, float), "move": np.zeros(2, float)}
+
     S = 4
     g_src = EmitGenome(S=S, v=(3.0, 4.0))
     g_dst = ReadGenome(S=S)
@@ -95,23 +93,26 @@ def test_emit_route_recv(world_factory, interpreter4):
     np.testing.assert_allclose(tail, [1.5, 2.0])
 
 
-class ParamEmitGenome:
-    """Emit arbitrary keyed vectors via {'emit:<k>': vec} and keep state zero."""
-
-    def __init__(self, emits: dict[str, np.ndarray], S: int = 4):
-        self.S = int(S)
-        # store copies as float ndarrays
-        self.emits = {
-            f"emit:{k}": np.asarray(v, dtype=float).ravel() for k, v in emits.items()
-        }
-
-    def activate(self, inputs):
-        out = {"state": np.zeros(self.S, dtype=float), "move": np.zeros(2, dtype=float)}
-        out.update(self.emits)
-        return out
-
-
 def test_multi_sources_aggregate_and_dim_guard(world_factory, interpreter4):
+    class ParamEmitGenome:
+        """Emit arbitrary keyed vectors via {'emit:<k>': vec} and keep state zero."""
+
+        def __init__(self, emits: dict[str, np.ndarray], S: int = 4):
+            self.S = int(S)
+            # store copies as float ndarrays
+            self.emits = {
+                f"emit:{k}": np.asarray(v, dtype=float).ravel()
+                for k, v in emits.items()
+            }
+
+        def activate(self, inputs):
+            out = {
+                "state": np.zeros(self.S, dtype=float),
+                "move": np.zeros(2, dtype=float),
+            }
+            out.update(self.emits)
+            return out
+
     S = 4
 
     # Sender A: emit a=[1,2], b=[5]
@@ -165,6 +166,15 @@ def test_multi_sources_aggregate_and_dim_guard(world_factory, interpreter4):
     np.testing.assert_allclose(recv_b, [3.2, 0.8, 0.0], atol=1e-12)
 
 
+def _mk_world(cells, world_factory):
+    return world_factory(
+        cells,
+        energy_policy=ConstantMaintenance(0.0),
+        reproduction_policy=SimpleBudding(),
+        message_router=MessageRouter(),
+    )
+
+
 class CopyRecvGenome:
     """
     Genome that:
@@ -192,15 +202,6 @@ class CopyRecvGenome:
             "move": np.zeros(2, dtype=float),  # no movement
             f"emit:{self.key}": self_state.copy(),  # emit own state
         }
-
-
-def _mk_world(cells, world_factory):
-    return world_factory(
-        cells,
-        energy_policy=ConstantMaintenance(0.0),
-        reproduction_policy=SimpleBudding(),
-        message_router=MessageRouter(),
-    )
 
 
 def test_connected_copy_two_cells_swap(interpreter4, world_factory):
@@ -299,12 +300,11 @@ def test_connected_average_three_cells(interpreter4, world_factory):
     np.testing.assert_allclose(C3.state, [0.5, 0.5, 0.0, 0.0])
 
 
-class _G:
-    def activate(self, x):
-        return np.zeros(6, float)
-
-
 def test_sense_skips_spatial(interpreter4):
+    class _G:
+        def activate(self, x):
+            return np.zeros(6, float)
+
     S, D = 4, 2
     c = Cell(
         [0, 0],
@@ -465,36 +465,35 @@ def test_alpha_contraction_rate(interpreter4, world_factory):
     np.testing.assert_allclose(d4, s4 * d0, atol=1e-12)
 
 
-class OneShotBudPolicy:
-    """
-    Test-only reproduction policy: buds exactly once from the first cell.
-    Calls the provided birth hook with (parent, child, world).
-    """
-
-    def __init__(self, on_birth=None):
-        self.on_birth = on_birth
-        self._done = False
-
-    def apply(self, world, parent, value, spawn_fn):
-        """Match World.apply_bud(...) → reproduction_policy.apply(world, parent, value, spawn_fn)."""
-        if self._done:
-            return
-        # Construct child (reuse parent's essentials)
-        child = Cell(
-            position=parent.position.copy(),
-            genome=parent.genome,
-            state_size=parent.state_size,
-            interpreter=parent.interpreter,
-            recv_layout=getattr(parent, "recv_layout", {}),
-        )
-        child.state = parent.state.copy()
-        spawn_fn(child)  # append via world’s spawn buffer
-        if callable(self.on_birth):
-            self.on_birth(parent, child)
-        self._done = True
-
-
 def test_birth_hook_inherits_connections(world_factory, interpreter4):
+    class OneShotBudPolicy:
+        """
+        Test-only reproduction policy: buds exactly once from the first cell.
+        Calls the provided birth hook with (parent, child, world).
+        """
+
+        def __init__(self, on_birth=None):
+            self.on_birth = on_birth
+            self._done = False
+
+        def apply(self, world, parent, value, spawn_fn):
+            """Match World.apply_bud(...) → reproduction_policy.apply(world, parent, value, spawn_fn)."""
+            if self._done:
+                return
+            # Construct child (reuse parent's essentials)
+            child = Cell(
+                position=parent.position.copy(),
+                genome=parent.genome,
+                state_size=parent.state_size,
+                interpreter=parent.interpreter,
+                recv_layout=getattr(parent, "recv_layout", {}),
+            )
+            child.state = parent.state.copy()
+            spawn_fn(child)  # append via world’s spawn buffer
+            if callable(self.on_birth):
+                self.on_birth(parent, child)
+            self._done = True
+
     class _ZeroG:
         def activate(self, x):
             # return dict passthrough; no 'bud'
