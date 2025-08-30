@@ -88,3 +88,11 @@ def test_multiple_cells_with_different_output_sizes(
 
     assert np.array_equal(c1.position, [4, 5])
     assert np.array_equal(c2.position, [15, 16])
+
+
+def test_interpreter_index_array(interpreter4):
+    # Suppose slot_defs maps "foo" -> [0,2,4] and "bar" -> slice(1,3)
+    interpreter4.slot_defs["foo"] = [0, 2, 4]
+    vec = np.array([10, 11, 12, 13, 14], float)
+    out = interpreter4.interpret(vec)
+    np.testing.assert_allclose(out["foo"], [10, 12, 14])
