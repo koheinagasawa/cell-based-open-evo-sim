@@ -5,6 +5,12 @@ from simulation.cell import Cell
 from simulation.lifecycle import init_connections_copy
 from simulation.messaging import MessageRouter
 from simulation.policies import ConstantMaintenance, SimpleBudding
+from visualization.introspection import (
+    degree_stats,
+    export_connections_dot,
+    export_connections_json,
+    to_json_str,
+)
 
 
 def _cells(interpreter4):
@@ -535,3 +541,46 @@ def test_birth_hook_inherits_connections(world_factory, interpreter4):
 
     # Child should inherit exactly the same outgoing connections
     assert child.conn_out == A.conn_out
+
+
+def _make_connected_cells(interpreter4):
+    class _G:
+        def activate(self, x):
+            return {"state": np.zeros(4, float), "move": np.zeros(2, float)}
+
+    A = Cell([-1, 0], _G(), state_size=4, interpreter=interpreter4)
+    B = Cell([1, 0], _G(), state_size=4, interpreter=interpreter4)
+    C = Cell([0, 1], _G(), state_size=4, interpreter=interpreter4)
+    A.set_connections({B.id: 0.9, C.id: 0.2})
+    C.set_connections({B.id: 0.5})
+    return A, B, C
+
+
+def test_export_json(interpreter4):
+    A, B, C = _make_connected_cells(interpreter4)
+    snap = export_connections_json([A, B, C])
+    # basic shape
+    assert {"nodes", "edges"} <= set(snap.keys())
+    ids = {n["id"] for n in snap["nodes"]}
+    assert ids == {A.id, B.id, C.id}
+    # edges present
+    es = {(e["src"], e["dst"]): e["w"] for e in snap["edges"]}
+    assert es[(A.id, B.id)] == 0.9
+    assert es[(A.id, C.id)] == 0.2
+    assert es[(C.id, B.id)] == 0.5
+    # serializable
+    s = to_json_str(snap)
+    assert isinstance(s, str) and '"edges"' in s
+
+
+def test_export_dot_and_stats(interpreter4):
+    A, B, C = _make_connected_cells(interpreter4)
+    dot = export_connections_dot([A, B, C], label_weights=True)
+    # key substrings
+    assert f'"{A.id}" -> "{B.id}" [label="0.9"]' in dot
+    assert f'"{C.id}" -> "{B.id}" [label="0.5"]' in dot
+    # degree stats
+    st = degree_stats([A, B, C])
+    assert st[A.id]["out_deg"] == 2 and st[A.id]["in_deg"] == 0
+    assert st[B.id]["in_deg"] == 2 and st[B.id]["out_deg"] == 0
+    assert st[B.id]["in_w"] == 0.9 + 0.5

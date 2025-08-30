@@ -24,6 +24,7 @@ def export_connections_json(cells, include_positions: bool = True) -> Dict[str, 
         "edges": [{"src":"A","dst":"B","w":0.7}, ...]
       }
     """
+    _ = build_registry(cells)  # raises on duplicate ids
     nodes = []
     edges = []
     for c in cells:
@@ -47,6 +48,7 @@ def export_connections_dot(cells, label_weights: bool = True) -> str:
     Export Graphviz DOT string (directed graph). Edge label shows weight if enabled.
     Node label is the cell id.
     """
+    _ = build_registry(cells)  # raises on duplicate ids
     lines: List[str] = ["digraph G {"]
     # Nodes
     for c in cells:
