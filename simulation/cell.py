@@ -167,7 +167,9 @@ class Cell:
             slots = self.interpreter.interpret(self.raw_output)
             self.output_slots = slots
             if "state" in slots:
-                # Defer committing state to World.step() commit phase
+                # Two-phase contract: never write to self.state here.
+                # Store the desired next state, which World.step() will commit
+                # synchronously for all cells in the commit phase.
                 self.next_state = np.array(slots["state"], dtype=float)
 
     def update_state(self, new_state):

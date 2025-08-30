@@ -140,11 +140,12 @@ class World:
         return [t[3] for t in entries]
 
     def step(self):
-        """
-        Two-phase update:
-        Phase 1: Every cell senses and decides (no world mutation).
-        Phase 2: Apply all actions at once (order-invariant).
-        """
+        # --- Two-phase update schedule (design contract) ---------------------
+        # 1) Build neighbor snapshots for ALL cells (read-only, previous-frame state)
+        # 2) Sense+Act for ALL cells (produce outputs; DO NOT mutate cell.state here)
+        # 3) Commit: apply cell.next_state -> cell.state for ALL cells (synchronous state update)
+        # 4) Reproduction, maintenance, deaths, time++ (project-specific policies)
+
         # -------- Phase 1: decide (no mutation to world state, only for cells allowed to act by lifecycle) --------
         intents = []
         for cell in self.cells:
