@@ -2,6 +2,7 @@
 import numpy as np
 
 from simulation.cell import Cell
+from simulation.lifecycle import init_connections_copy
 from simulation.messaging import MessageRouter
 from simulation.policies import ConstantMaintenance, SimpleBudding
 
@@ -462,3 +463,76 @@ def test_alpha_contraction_rate(interpreter4, world_factory):
     d4 = B.state - A.state
     s4 = 1.0 - 6.0 * alpha + 8.0 * (alpha**2) - 2.0 * (alpha**3)
     np.testing.assert_allclose(d4, s4 * d0, atol=1e-12)
+
+
+class OneShotBudPolicy:
+    """
+    Test-only reproduction policy: buds exactly once from the first cell.
+    Calls the provided birth hook with (parent, child, world).
+    """
+
+    def __init__(self, on_birth=None):
+        self.on_birth = on_birth
+        self._done = False
+
+    def apply(self, world, parent, value, spawn_fn):
+        """Match World.apply_bud(...) → reproduction_policy.apply(world, parent, value, spawn_fn)."""
+        if self._done:
+            return
+        # Construct child (reuse parent's essentials)
+        child = Cell(
+            position=parent.position.copy(),
+            genome=parent.genome,
+            state_size=parent.state_size,
+            interpreter=parent.interpreter,
+            recv_layout=getattr(parent, "recv_layout", {}),
+        )
+        child.state = parent.state.copy()
+        spawn_fn(child)  # append via world’s spawn buffer
+        if callable(self.on_birth):
+            self.on_birth(parent, child)
+        self._done = True
+
+
+def test_birth_hook_inherits_connections(world_factory, interpreter4):
+    class _ZeroG:
+        def activate(self, x):
+            # return dict passthrough; no 'bud'
+            return {"state": np.zeros(4, float), "move": np.zeros(2, float)}
+
+    class _BudOnceG:
+        """Emit 'bud' once, then stop."""
+
+        def __init__(self):
+            self.done = False
+
+        def activate(self, x):
+            out = {"state": np.zeros(4, float), "move": np.zeros(2, float)}
+            if not self.done:
+                out["bud"] = np.array([1.0], float)  # any value is fine
+                self.done = True
+            return out
+
+    A = Cell([-1.0, 0.0], _BudOnceG(), state_size=4, interpreter=interpreter4)
+    B = Cell([+0.0, 1.0], _ZeroG(), state_size=4, interpreter=interpreter4)
+    C = Cell([+1.0, 0.0], _ZeroG(), state_size=4, interpreter=interpreter4)
+
+    # Parent's outgoing edges
+    A.set_connections({B.id: 0.8, C.id: 0.2})
+
+    w = world_factory(
+        [A, B, C],
+        energy_policy=ConstantMaintenance(0.0),
+        reproduction_policy=OneShotBudPolicy(on_birth=init_connections_copy),
+        message_router=MessageRouter(),  # not required for this test, but harmless
+    )
+
+    # Run one step to trigger one-shot budding
+    w.step()
+
+    # A new child appended at the end
+    child = w.cells[-1]
+    assert child is not A and child is not B and child is not C
+
+    # Child should inherit exactly the same outgoing connections
+    assert child.conn_out == A.conn_out

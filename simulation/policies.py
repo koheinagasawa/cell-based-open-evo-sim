@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -24,6 +25,7 @@ class SimpleBudding:
     cost: float = 0.5  # energy paid by parent at bud time
     init_energy: float = 0.4  # newborn initial energy
     offset_sigma: float = 0.2  # jitter if no offset is provided
+    init_child: Optional[Callable[["Cell", "Cell", "World"], None]] = None
 
     def apply(self, world, parent, value, spawn_fn):
         """Interpret 'value' and spawn a single offspring if conditions hold.
@@ -73,6 +75,10 @@ class SimpleBudding:
         )
         # RNG will be attached by the world; newborn does not pay maintenance this frame.
         spawn_fn(baby)
+
+        # Call optional birth hook (after child exists, before step ends)
+        if self.init_child is not None:
+            self.init_child(baby, parent, world)
 
 
 @dataclass(frozen=True)
