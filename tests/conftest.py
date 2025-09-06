@@ -13,6 +13,12 @@ from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
 from simulation.world import World
 
+try:
+    # Optional: fields are pluggable; tests may pass a FieldRouter
+    from simulation.fields import FieldRouter  # noqa: F401
+except Exception:
+    FieldRouter = object  # type: ignore
+
 
 # ---------------------------
 # Shared fixtures
@@ -85,6 +91,8 @@ def world_factory() -> Callable[..., World]:
         reproduction_policy: Any = None,
         lifecycle_policy: Any = None,
         use_neighbors: bool = True,
+        field_router=None,
+        use_fields: bool = False,
     ) -> World:
         return World(
             cells,
@@ -95,6 +103,8 @@ def world_factory() -> Callable[..., World]:
             reproduction_policy=reproduction_policy or tu.DummyBudPolicy(),
             lifecycle_policy=lifecycle_policy,  # may be None (World falls back to _NoDeath)
             use_neighbors=use_neighbors,
+            field_router=field_router,
+            use_fields=use_fields,
         )
 
     return _factory
