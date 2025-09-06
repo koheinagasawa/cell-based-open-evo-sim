@@ -1,0 +1,176 @@
+# simulation/fields.py
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, List, Tuple
+
+import numpy as np
+
+
+def _gaussian_kernel(r2: float, sigma: float) -> float:
+    """Unnormalized isotropic Gaussian: exp(-0.5 * r^2 / sigma^2)."""
+    if sigma <= 0.0:
+        return 0.0 if r2 > 0.0 else 1.0
+    return float(np.exp(-0.5 * r2 / (sigma * sigma)))
+
+
+@dataclass
+class FieldChannel:
+    """
+    Continuous scalar field in R^D as a sum of decaying Gaussian sources.
+
+    Value(x) = Σ a_i * K(||x - p_i||)
+    Grad(x)  = Σ a_i * dK/dx = Σ a_i * (-(x - p_i)/sigma^2) * K
+
+    Notes:
+      * Naive O(N*M) without spatial acceleration (OK for small N).
+      * dim_space can be 2 or 3 (future-proof).
+    """
+
+    name: str
+    dim_space: int = 2
+    sigma: float = 1.0
+    decay: float = 0.97
+    radius: float | None = None  # Optional cutoff
+    prune_eps: float = 1e-8  # Cull tiny sources
+
+    # Internal: list[(pos[D], amount)]
+    sources: List[Tuple[np.ndarray, float]] = field(default_factory=list)
+
+    def deposit(self, position: np.ndarray, amount: float) -> None:
+        """Append a new source; align/truncate pos to D if needed."""
+        p = np.asarray(position, dtype=float).ravel()
+        D = int(self.dim_space)
+        if p.size < D:
+            p = np.pad(p, (0, D - p.size))
+        elif p.size > D:
+            p = p[:D]
+        a = float(amount)
+        if not np.isfinite(a) or a == 0.0:
+            return
+        self.sources.append((p, a))
+
+    def apply_decay(self) -> None:
+        """Multiply all amounts by decay and prune tiny sources."""
+        if not self.sources:
+            return
+        dec = float(self.decay)
+        if dec <= 0.0:
+            self.sources.clear()
+            return
+        new_sources: List[Tuple[np.ndarray, float]] = []
+        for p, a in self.sources:
+            aa = a * dec
+            if abs(aa) >= self.prune_eps:
+                new_sources.append((p, aa))
+        self.sources = new_sources
+
+    def sample(self, position: np.ndarray) -> tuple[float, np.ndarray]:
+        """Return (value, grad[D]) at position (R^D)."""
+        x = np.asarray(position, dtype=float).ravel()
+        D = int(self.dim_space)
+        if x.size < D:
+            x = np.pad(x, (0, D - x.size))
+        elif x.size > D:
+            x = x[:D]
+
+        val = 0.0
+        grad = np.zeros(D, dtype=float)
+        sig2 = float(self.sigma * self.sigma) if self.sigma > 0 else 1.0
+        r2max = None if self.radius is None else float(self.radius * self.radius)
+
+        for p, a in self.sources:
+            d = x - p
+            r2 = float(d @ d)
+            if r2max is not None and r2 > r2max:
+                continue
+            k = _gaussian_kernel(r2, self.sigma)
+            if k == 0.0:
+                continue
+            val += a * k
+            grad += a * (-(d / sig2)) * k  # dK/dx
+
+        return float(val), grad
+
+
+@dataclass
+class FieldRouter:
+    """
+    World-attached router for environmental fields.
+
+    Per frame:
+      1) sample_into_cell(cell)  -> writes declared field inputs (val/grad) to cell.field_inputs
+      2) apply_decay()           -> decay all channels
+      3) collect_from_cells(...) -> consume 'emit_field:*' from output slots and deposit
+
+    Contract: Effects of 'emit_field:*' appear in the NEXT frame.
+    """
+
+    channels: Dict[str, FieldChannel]
+
+    def sample_into_cell(self, cell) -> None:
+        """
+        Populate cell.field_inputs according to cell.field_layout declarations.
+        Expected keys:
+          - 'field:<name>:val'  (dim=1)
+          - 'field:<name>:grad' (dim=D)
+        Unknown channels/keys are zeroed.
+        """
+        layout: Dict[str, int] = getattr(cell, "field_layout", {}) or {}
+        out: Dict[str, np.ndarray] = {}
+        for key, dim in sorted(layout.items()):
+            dim = int(dim)
+            arr = np.zeros(dim, dtype=float)
+
+            # Parse 'field:<name>:<kind>'
+            try:
+                _, name, kind = key.split(":", 2)
+            except ValueError:
+                out[key] = arr
+                continue
+
+            ch = self.channels.get(name)
+            if ch is None:
+                out[key] = arr
+                continue
+
+            val, grad = ch.sample(getattr(cell, "position", np.zeros(ch.dim_space)))
+            if kind == "val":
+                if dim > 0:
+                    arr[0] = float(val)
+            elif kind == "grad":
+                g = np.asarray(grad, dtype=float).ravel()
+                n = min(dim, g.size)
+                if n > 0:
+                    arr[:n] = g[:n]
+            # else: leave zeros
+            out[key] = arr
+
+        cell.field_inputs = out
+
+    def apply_decay(self) -> None:
+        for ch in self.channels.values():
+            ch.apply_decay()
+
+    def collect_from_cells(self, cells: Iterable) -> None:
+        """Consume 'emit_field:<name>' from output slots and deposit scalar amount."""
+        for c in cells:
+            slots = getattr(c, "output_slots", None)
+            if not slots:
+                continue
+            for k, v in slots.items():
+                if not isinstance(k, str) or not k.startswith("emit_field:"):
+                    continue
+                try:
+                    _, name = k.split(":", 1)
+                except ValueError:
+                    continue
+                ch = self.channels.get(name)
+                if ch is None:
+                    continue
+                vec = np.asarray(v, dtype=float).ravel()
+                if vec.size == 0:
+                    continue
+                ch.deposit(
+                    getattr(c, "position", np.zeros(ch.dim_space)), float(vec[0])
+                )

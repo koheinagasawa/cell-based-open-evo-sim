@@ -51,6 +51,14 @@ class Cell:
         # Expected layout for recv slots; ensures fixed input size.
         # Example: {'recv:a': 2, 'recv:b': 4}
         self.recv_layout: dict[str, int] = dict(kwargs.get("recv_layout", {}))
+        # --- Environmental fields (declarative, optional) -------------------
+        # Input declaration for environmental fields. Keys are *explicit*:
+        #   'field:<name>:val'  -> dim=1
+        #   'field:<name>:grad' -> dim=D (position dimensionality)
+        # Values are lengths (int). Absent keys imply zero-length / not appended.
+        self.field_layout: dict[str, int] = dict(kwargs.get("field_layout", {}))
+        # Per-frame buffer populated by World/FieldRouter before sense().
+        self.field_inputs: dict[str, np.ndarray] = {}
 
         self.max_neighbors = int(max_neighbors)
         self.include_neighbor_mask = bool(include_neighbor_mask)
@@ -81,6 +89,8 @@ class Cell:
             time_features(optional),
             neighbor_mask(max_neighbors, 1.0 for present else 0.0)  <-- appended at tail
             num_neighbors(1)                                        <-- appended at tail
+            + connected messaging tail:  sorted(recv_layout) vectors (fixed)
+            + field inputs tail:         sorted(field_layout) vectors (fixed)
           ]
 
         Notes:
@@ -114,6 +124,20 @@ class Cell:
                     dim = int(self.recv_layout[key])
                     v = np.asarray(
                         self.inbox.get(key, np.zeros(dim, dtype=float)), dtype=float
+                    ).ravel()
+                    out = np.zeros(dim, dtype=float)
+                    n = min(dim, v.size)
+                    if n > 0:
+                        out[:n] = v[:n]
+                    input_vec += out.tolist()
+
+            # Field inputs tail (deterministic, fixed; zeros when not provided)
+            if self.field_layout:
+                for key in sorted(self.field_layout.keys()):
+                    dim = int(self.field_layout[key])
+                    v = np.asarray(
+                        self.field_inputs.get(key, np.zeros(dim, dtype=float)),
+                        dtype=float,
                     ).ravel()
                     out = np.zeros(dim, dtype=float)
                     n = min(dim, v.size)
@@ -210,6 +234,22 @@ class Cell:
                 ).ravel()
                 out = np.zeros(dim, dtype=float)
                 # copy up to dim (truncate or zero-pad)
+                n = min(dim, v.size)
+                if n > 0:
+                    out[:n] = v[:n]
+                input_vec += out.tolist()
+
+        # --- Field inputs tail (deterministic, fixed) ------------------------
+        # For each declared field key (sorted by name), append a fixed-length vector.
+        # World/FieldRouter must have populated cell.field_inputs before sense().
+        if self.field_layout:
+            for key in sorted(self.field_layout.keys()):
+                dim = int(self.field_layout[key])
+                v = np.asarray(
+                    self.field_inputs.get(key, np.zeros(dim, dtype=float)),
+                    dtype=float,
+                ).ravel()
+                out = np.zeros(dim, dtype=float)
                 n = min(dim, v.size)
                 if n > 0:
                     out[:n] = v[:n]

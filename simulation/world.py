@@ -4,6 +4,12 @@ from typing import Any, Callable, Dict, Protocol
 
 import numpy as np
 
+try:
+    # Optional import; World can run without fields.
+    from simulation.fields import FieldRouter
+except Exception:  # pragma: no cover
+    FieldRouter = Any  # type: ignore
+
 
 class EnergyPolicy(Protocol):
     """Interface: returns per-step basal energy drain for a given cell."""
@@ -61,6 +67,8 @@ class World:
         reproduction_policy: BudPolicy,
         lifecycle_policy: LifecyclePolicy | None = None,
         use_neighbors: bool = True,
+        field_router: FieldRouter | None = None,
+        use_fields: bool = False,
     ):
         """
         :param seed: master seed for reproducible experiments. If None, use 0.
@@ -84,6 +92,11 @@ class World:
         self.actions = actions or {}
 
         self.message_router = message_router
+
+        # Feature gates
+        self.use_neighbors = bool(use_neighbors)
+        self.field_router = field_router
+        self.use_fields = bool(use_fields)
 
         # If False, World will not perform neighbor search at all.
         # Per-cell max_neighbors==0 also guarantees empty neighbors.
@@ -162,7 +175,7 @@ class World:
         # 2) Sense+Act for ALL cells (produce outputs; DO NOT mutate cell.state here)
         # 3) Commit: apply cell.next_state -> cell.state for ALL cells (synchronous state update)
         # 4) Reproduction, maintenance, deaths, time++ (project-specific policies)
-        # 5) Connected messaging routing (two-phase; affects NEXT frame)
+        # 5) Connected messaging + Field routing (two-phase; affect NEXT frame)
         # -------- Phase 1: decide (no mutation to world state, only for cells allowed to act by lifecycle) --------
         intents = []
         for cell in self.cells:
@@ -172,6 +185,18 @@ class World:
                     neighbors = []
                 else:
                     neighbors = self.get_neighbors(cell)
+
+                # Populate field inputs for this frame (read-only snapshot)
+                if self.use_fields and self.field_router is not None:
+                    try:
+                        self.field_router.sample_into_cell(cell)
+                    except Exception:
+                        # Be robust: if router misconfigured, zero out field inputs.
+                        cell.field_inputs = {}
+                else:
+                    # Ensure no stale field inputs from prior frames
+                    if hasattr(cell, "field_inputs"):
+                        cell.field_inputs = {}
 
                 cell.step(
                     neighbors
@@ -231,7 +256,13 @@ class World:
                 self.add_cell(newborn)
             self._spawn_buffer.clear()
 
-        # --------  Phase 5: Connected messaging routing (two-phase; affects NEXT frame)) --------
+        # --------  Phase 5: Connected messaging & Field routing (NEXT frame) --------
+        # Fields: decay old sources, then collect current-frame deposits
+        if self.use_fields and self.field_router is not None:
+            self.field_router.apply_decay()
+            self.field_router.collect_from_cells(self.cells)
+
+        # Connected messaging: route 'emit:*' to 'recv:*' staged inboxes
         if self.message_router is not None:
             self.message_router.route_and_stage(self.cells)
             # Commit staged inboxes for next frame
