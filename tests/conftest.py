@@ -84,6 +84,7 @@ def world_factory() -> Callable[..., World]:
         energy_policy: Any = None,
         reproduction_policy: Any = None,
         lifecycle_policy: Any = None,
+        use_neighbors: bool = True,
     ) -> World:
         return World(
             cells,
@@ -93,6 +94,7 @@ def world_factory() -> Callable[..., World]:
             energy_policy=energy_policy or tu.DummyEnergyPolicy(),
             reproduction_policy=reproduction_policy or tu.DummyBudPolicy(),
             lifecycle_policy=lifecycle_policy,  # may be None (World falls back to _NoDeath)
+            use_neighbors=use_neighbors,
         )
 
     return _factory

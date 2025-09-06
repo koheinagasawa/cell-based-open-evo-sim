@@ -680,3 +680,78 @@ def test_budding_logs_birth_and_draws_arrows(world_factory, interpreter4):
     )
     assert len(artists) == 2
     # plt.show()
+
+
+def test_connected_move_follows_recv_vector(world_factory, interpreter4):
+    class EmitDirGenome:
+        """A emits a fixed vector via 'emit:dir'; does not move."""
+
+        def __init__(self, S=4, vec=(0.5, -0.2)):
+            self.S = S
+            self.vec = np.array(vec, dtype=float)
+
+        def activate(self, inputs):
+            out = np.zeros(self.S + 2, dtype=float)
+            return {
+                "state": out[: self.S],  # keep state = 0
+                "move": out[self.S :],  # no movement from A
+                "emit:dir": self.vec,  # -> routed to recv:dir
+            }
+
+    class FollowRecvGenome:
+        """B reads the last 2 inputs (recv:dir) and uses it as 'move'."""
+
+        def __init__(self, S=4):
+            self.S = S
+
+        def activate(self, inputs):
+            inputs = np.asarray(inputs, dtype=float).ravel()
+            # Inputs layout with max_neighbors=0:
+            # [pos(2), state(S), recv:... (fixed tail)]
+            v = inputs[-2:]  # recv:dir (dim=2)
+            out = np.zeros(self.S + 2, dtype=float)
+            out[self.S : self.S + 2] = v  # write to 'move'
+            return {"state": out[: self.S], "move": out[self.S :]}
+
+    # Build cells
+    A = Cell(
+        position=[0.0, 0.0],
+        genome=EmitDirGenome(),
+        interpreter=interpreter4,
+        recv_layout={},  # A doesn't receive
+        energy_init=1.0,
+        energy_max=1.0,
+    )
+    B = Cell(
+        position=[1.0, 0.0],
+        genome=FollowRecvGenome(),
+        interpreter=interpreter4,
+        recv_layout={"recv:dir": 2},  # declare we expect 2-D incoming dir
+        energy_init=1.0,
+        energy_max=1.0,
+    )
+
+    # Wire A -> B with weight w
+    w = 0.8
+    A.set_connections([(B.id, w)])
+
+    # World with router; neighbor search will be skipped because max_neighbors=0
+    world = world_factory(
+        [A, B],
+        message_router=MessageRouter(),
+        use_neighbors=False,  # would also skip globally.
+        # lifecycle_policy=None (default no-death)
+    )
+
+    # Step 1: routing happens but B moves on *next* frame -> no movement yet.
+    p0 = B.position.copy()
+    world.step()
+    assert np.allclose(B.position, p0), "B must not move in the same frame."
+
+    # Step 2: B should move by w * vec.
+    vec = np.array([0.5, -0.2], dtype=float)
+    world.step()
+    expected = p0 + w * vec
+    assert np.allclose(
+        B.position, expected, atol=1e-9
+    ), f"Expected {expected}, got {B.position}"
