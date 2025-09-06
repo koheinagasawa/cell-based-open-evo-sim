@@ -60,6 +60,7 @@ class World:
         energy_policy: EnergyPolicy,
         reproduction_policy: BudPolicy,
         lifecycle_policy: LifecyclePolicy | None = None,
+        use_neighbors: bool = True,
     ):
         """
         :param seed: master seed for reproducible experiments. If None, use 0.
@@ -83,6 +84,10 @@ class World:
         self.actions = actions or {}
 
         self.message_router = message_router
+
+        # If False, World will not perform neighbor search at all.
+        # Per-cell max_neighbors==0 also guarantees empty neighbors.
+        self.use_neighbors = bool(use_neighbors)
 
         # Policies (thin, swappable)
         self.energy_policy = energy_policy
@@ -125,6 +130,15 @@ class World:
         2) by position tuple (lexicographic) to break ties
         3) by cell.id as a final tiebreaker (should be rare)
         """
+
+        # Fast path: globally disabled.
+        if not self.use_neighbors:
+            return []
+
+        # Fast path: the cell itself never uses neighbor inputs.
+        if getattr(target_cell, "max_neighbors", 0) <= 0:
+            return []
+
         entries = []
         r2 = float(radius * radius)
 
@@ -144,7 +158,7 @@ class World:
 
     def step(self):
         # --- Two-phase update schedule (design contract) ---------------------
-        # 1) Build neighbor snapshots for ALL cells (read-only, previous-frame state)
+        # 1) (Optionally) Build neighbor snapshots for ALL cells (read-only, previous-frame state)
         # 2) Sense+Act for ALL cells (produce outputs; DO NOT mutate cell.state here)
         # 3) Commit: apply cell.next_state -> cell.state for ALL cells (synchronous state update)
         # 4) Reproduction, maintenance, deaths, time++ (project-specific policies)
@@ -153,7 +167,12 @@ class World:
         intents = []
         for cell in self.cells:
             if self.lifecycle_policy.can_act(cell):
-                neighbors = self.get_neighbors(cell)
+                # Skip neighbor search when globally disabled or max_neighbors==0.
+                if not self.use_neighbors or getattr(cell, "max_neighbors", 0) <= 0:
+                    neighbors = []
+                else:
+                    neighbors = self.get_neighbors(cell)
+
                 cell.step(
                     neighbors
                 )  # computes raw_output/output_slots; may update internal state
