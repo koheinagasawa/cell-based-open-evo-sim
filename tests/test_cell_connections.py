@@ -5,9 +5,14 @@ import numpy as np
 import tests.utils.visualization as vis
 from simulation.cell import Cell
 from simulation.input_layout import InputLayout
+from simulation.interpreter import SlotBasedInterpreter
 from simulation.lifecycle import chain_inits, init_connections_copy, log_birth
 from simulation.messaging import MessageRouter
-from simulation.policies import ConstantMaintenance, SimpleBudding
+from simulation.policies import (
+    ConstantMaintenance,
+    ParentChildLinkWrapper,
+    SimpleBudding,
+)
 from tests.utils.test_utils import Recorder
 from visualization.introspection import (
     degree_stats,
@@ -758,3 +763,51 @@ def test_connected_move_follows_recv_vector(world_factory, interpreter4):
     assert np.allclose(
         B.position, expected, atol=1e-9
     ), f"Expected {expected}, got {B.position}"
+
+
+def test_parent_child_link_created(world_factory):
+    # Minimal interpreter: 'state', 'move', 'bud' (bud is a scalar gate)
+    S = 4
+    interp = SlotBasedInterpreter(
+        {
+            "state": slice(0, S),
+            "move": slice(S, S + 2),
+            "bud": S + 2,
+        }
+    )
+
+    class AlwaysBudGenome:
+        """Emit a constant bud signal; no movement."""
+
+        def activate(self, inputs):
+            return {
+                "state": np.zeros(S),
+                "move": np.zeros(2),
+                "bud": np.array([1.0]),  # > threshold => attempt bud
+            }
+
+    # Parent cell with plenty of energy to allow budding.
+    parent = Cell([0.0, 0.0], AlwaysBudGenome(), state_size=S, interpreter=interp)
+    parent.energy = 10.0  # ensure reproduction is not blocked by energy
+
+    # Wrap base SimpleBudding with link creation (unidirectional for this test).
+    rp = ParentChildLinkWrapper(SimpleBudding(), weight=0.8, bidirectional=False)
+
+    w = world_factory([parent], reproduction_policy=rp)
+
+    # Step once: parent buds -> one child is spawned and linked
+    w.step()
+
+    # There must now be exactly 2 cells.
+    assert len(w.cells) == 2
+
+    # Identify child (the one that is not 'parent')
+    child = next(c for c in w.cells if c.id != parent.id)
+
+    # Parent's outgoing connections must contain child with weight 0.8
+    conn_out = getattr(parent, "conn_out", {})
+    assert child.id in conn_out
+    assert abs(float(conn_out[child.id]) - 0.8) < 1e-9
+
+    # If you also want to check bidirectional behavior, enable bidirectional=True
+    # and assert child.conn_out[parent.id] exists with the same weight.

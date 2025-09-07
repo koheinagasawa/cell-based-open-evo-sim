@@ -81,6 +81,49 @@ class SimpleBudding:
             self.init_child(baby, parent, world)
 
 
+class ParentChildLinkWrapper:
+    """
+    BudPolicy wrapper that automatically links parent and child upon birth.
+
+    It composes an existing BudPolicy (e.g., SimpleBudding) and intercepts
+    the spawn callback to install message connections:
+      parent --(weight)--> child
+      and optionally child --(weight)--> parent (bidirectional=True)
+
+    This does NOT alter any other behavior (energy accounting, thresholds, etc.).
+    """
+
+    def __init__(
+        self, base_policy, *, weight: float = 1.0, bidirectional: bool = False
+    ):
+        self.base_policy = base_policy
+        self.weight = float(weight)
+        self.bidirectional = bool(bidirectional)
+
+    def apply(self, world, parent, value, spawn_cb):
+        """Delegate to base policy while injecting the link after child creation."""
+
+        def _spawn(child):
+            # Create parent -> child link
+            try:
+                parent.set_connections([(child.id, self.weight)])
+            except Exception as e:
+                raise RuntimeError(f"Failed to set parent->child connection: {e}")
+
+            # Optionally create child -> parent link
+            if self.bidirectional:
+                try:
+                    child.set_connections([(parent.id, self.weight)])
+                except Exception as e:
+                    raise RuntimeError(f"Failed to set child->parent connection: {e}")
+
+            # Forward to world spawn buffer
+            spawn_cb(child)
+
+        # Call base policy with our intercepted spawn
+        return self.base_policy.apply(world, parent, value, _spawn)
+
+
 @dataclass(frozen=True)
 class NoDeath:
     """Lifecycle: never blocks acting; never removes."""
