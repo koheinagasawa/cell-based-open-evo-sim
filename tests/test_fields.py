@@ -89,22 +89,21 @@ def test_field_gradient_guides_motion(world_factory, interpreter4):
             grad = self.layout.get_vector(inputs, "field:pher:grad")
             return {"state": np.zeros(4), "move": grad}
 
+    field_layout = {"field:pher:grad": 2}
     A = Cell(
         [0.0, 0.0],
         Emitter(),
         interpreter=interpreter4,
         max_neighbors=0,
         recv_layout={},
-        field_layout={"field:pher:grad": 2},
     )
-    field_layout_B = {"field:pher:grad": 2}
     B = Cell(
         [1.0, 0.0],
-        Follower(layout=InputLayout.from_dicts({}, field_layout_B)),
+        Follower(layout=InputLayout.from_dicts({}, field_layout)),
         interpreter=interpreter4,
         max_neighbors=0,
         recv_layout={},
-        field_layout=field_layout_B,
+        field_layout=field_layout,
     )
 
     w = world_factory([A, B])
