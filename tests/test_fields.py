@@ -1,10 +1,12 @@
 # tests/test_field_basic.py
+import matplotlib.pyplot as plt
 import numpy as np
 
 from simulation.cell import Cell
 from simulation.fields import FieldChannel, FieldRouter
 from simulation.input_layout import InputLayout
 from tests.conftest import interpreter4
+from tests.utils.visualization import plot_field_scalar_and_quiver
 
 
 def test_field_deposit_and_decay(world_factory, interpreter4):
@@ -306,3 +308,46 @@ def test_field_3d_sampling_smoke(world_factory, interpreter4):
     assert v1 > 0.0
     assert g1.shape == (3,)
     assert g1[0] < 0.0  # x-gradient points toward E at origin
+
+
+def test_plot_field_scalar_and_quiver_smoke(world_factory, interpreter4, tmp_path):
+    # Prepare a simple 2D field and a one-shot emitter at origin.
+    fr = FieldRouter(
+        {"pher": FieldChannel(name="pher", dim_space=2, sigma=1.0, decay=0.95)}
+    )
+
+    class EmitterOnce:
+        def __init__(self):
+            self.done = False
+
+        def activate(self, inputs):
+            amt = [1.0] if not self.done else [0.0]
+            self.done = True
+            return {"state": np.zeros(4), "move": np.zeros(2), "emit_field:pher": amt}
+
+    E = Cell(
+        [0.0, 0.0],
+        EmitterOnce(),
+        interpreter=interpreter4,
+        max_neighbors=0,
+        recv_layout={},
+        field_layout={"field:pher:val": 1},
+    )
+
+    w = world_factory([E], field_router=fr, use_fields=True)
+
+    # Step once to deposit, second step to read non-zero field
+    w.step()
+    w.step()
+
+    fig, ax = plt.subplots(figsize=(4, 3), dpi=100)
+    im = plot_field_scalar_and_quiver(ax, w, channel="pher", grid_n=21)
+    # The drawn scalar field should have positive values somewhere.
+    arr = im.get_array()
+    assert float(np.max(arr)) > 0.0
+
+    # Save to ensure no I/O or rendering issues occur.
+    out = tmp_path / "field_vis.png"
+    fig.savefig(out)
+    plt.close(fig)
+    assert out.exists() and out.stat().st_size > 0
