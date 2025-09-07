@@ -821,3 +821,51 @@ def draw_connections(
         ax.set_ylim(ymin - pad, ymax + pad)
         ax.set_aspect("equal", adjustable="box")
     return artists
+
+
+def plot_field_scalar_and_quiver(
+    ax, world, channel: str, *, xlim=None, ylim=None, grid_n: int = 25
+):
+    """
+    Render a scalar field (value) as an image and its gradient as a quiver.
+    Requirements:
+      - world.use_fields == True and world.field_router has 'channel'
+      - 2D only (for now). 3D channels are not plotted here.
+    """
+    fr = getattr(world, "field_router", None)
+    assert fr is not None and channel in fr.channels, "FieldRouter or channel missing"
+    ch = fr.channels[channel]
+    assert int(ch.dim_space) == 2, "Use this helper for 2D channels only"
+
+    # Determine bounds
+    xs = [c.position[0] for c in world.cells]
+    ys = [c.position[1] for c in world.cells]
+    if not xs or not ys:
+        xs, ys = [0.0], [0.0]
+    margin = 1.0
+    xlo = xs[0] if xlim is None else xlim[0]
+    xhi = xs[0] if xlim is None else xlim[1]
+    ylo = ys[0] if ylim is None else ylim[0]
+    yhi = ys[0] if ylim is None else ylim[1]
+    if xlim is None:
+        xlo, xhi = min(xs) - margin, max(xs) + margin
+    if ylim is None:
+        ylo, yhi = min(ys) - margin, max(ys) + margin
+
+    X = np.linspace(xlo, xhi, grid_n)
+    Y = np.linspace(ylo, yhi, grid_n)
+    XX, YY = np.meshgrid(X, Y)
+    V = np.zeros_like(XX)
+    GX = np.zeros_like(XX)
+    GY = np.zeros_like(XX)
+    for i in range(grid_n):
+        for j in range(grid_n):
+            val, grad = ch.sample(np.array([XX[i, j], YY[i, j]], dtype=float))
+            V[i, j] = val
+            GX[i, j] = grad[0]
+            GY[i, j] = grad[1]
+
+    im = ax.imshow(V, extent=[xlo, xhi, ylo, yhi], origin="lower", alpha=0.8)
+    ax.quiver(XX, YY, GX, GY, angles="xy", scale_units="xy", scale=1.0, width=0.002)
+    ax.set_title(f"Field '{channel}': value (imshow) & grad (quiver)")
+    return im
