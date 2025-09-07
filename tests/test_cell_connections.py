@@ -809,5 +809,52 @@ def test_parent_child_link_created(world_factory):
     assert child.id in conn_out
     assert abs(float(conn_out[child.id]) - 0.8) < 1e-9
 
-    # If you also want to check bidirectional behavior, enable bidirectional=True
-    # and assert child.conn_out[parent.id] exists with the same weight.
+
+def test_parent_child_link_created_bidirectional(world_factory):
+    # Minimal interpreter: 'state', 'move', 'bud' (bud is a scalar gate)
+    S = 4
+    interp = SlotBasedInterpreter(
+        {
+            "state": slice(0, S),
+            "move": slice(S, S + 2),
+            "bud": S + 2,
+        }
+    )
+
+    class AlwaysBudGenome:
+        """Emit a constant bud signal; no movement."""
+
+        def activate(self, inputs):
+            return {
+                "state": np.zeros(S),
+                "move": np.zeros(2),
+                "bud": np.array([1.0]),  # > threshold => attempt bud
+            }
+
+    # Parent cell with plenty of energy to allow budding.
+    parent = Cell([0.0, 0.0], AlwaysBudGenome(), state_size=S, interpreter=interp)
+    parent.energy = 10.0  # ensure reproduction is not blocked by energy
+
+    # Wrap base SimpleBudding with link creation (unidirectional for this test).
+    rp = ParentChildLinkWrapper(SimpleBudding(), weight=0.8, bidirectional=True)
+
+    w = world_factory([parent], reproduction_policy=rp)
+
+    # Step once: parent buds -> one child is spawned and linked
+    w.step()
+
+    # There must now be exactly 2 cells.
+    assert len(w.cells) == 2
+
+    # Identify child (the one that is not 'parent')
+    child = next(c for c in w.cells if c.id != parent.id)
+
+    # Parent's outgoing connections must contain child with weight 0.8
+    conn_out = getattr(parent, "conn_out", {})
+    assert child.id in conn_out
+    assert abs(float(conn_out[child.id]) - 0.8) < 1e-9
+
+    # Child's incoming connections must contain parent with weight 0.8
+    conn_out = getattr(child, "conn_out", {})
+    assert parent.id in conn_out
+    assert abs(float(conn_out[parent.id]) - 0.8) < 1e-9
