@@ -4,6 +4,7 @@ import numpy as np
 
 import tests.utils.visualization as vis
 from simulation.cell import Cell
+from simulation.input_layout import InputLayout
 from simulation.lifecycle import chain_inits, init_connections_copy, log_birth
 from simulation.messaging import MessageRouter
 from simulation.policies import ConstantMaintenance, SimpleBudding
@@ -699,21 +700,21 @@ def test_connected_move_follows_recv_vector(world_factory, interpreter4):
             }
 
     class FollowRecvGenome:
-        """B reads the last 2 inputs (recv:dir) and uses it as 'move'."""
+        """B reads 'recv:dir' via a declaration-driven layout (no magic indices)."""
 
-        def __init__(self, S=4):
+        def __init__(self, layout, S=4):
             self.S = S
+            self.layout = layout
 
         def activate(self, inputs):
-            inputs = np.asarray(inputs, dtype=float).ravel()
-            # Inputs layout with max_neighbors=0:
-            # [pos(2), state(S), recv:... (fixed tail)]
-            v = inputs[-2:]  # recv:dir (dim=2)
+            v = self.layout.get_vector(inputs, "recv:dir")
             out = np.zeros(self.S + 2, dtype=float)
             out[self.S : self.S + 2] = v  # write to 'move'
             return {"state": out[: self.S], "move": out[self.S :]}
 
-    # Build cells
+    # Build cells (declare layouts once; reuse for both Cell and Genome)
+    recv_layout_B = {"recv:dir": 2}
+    field_layout_B = {}
     A = Cell(
         position=[0.0, 0.0],
         genome=EmitDirGenome(),
@@ -724,9 +725,11 @@ def test_connected_move_follows_recv_vector(world_factory, interpreter4):
     )
     B = Cell(
         position=[1.0, 0.0],
-        genome=FollowRecvGenome(),
+        genome=FollowRecvGenome(
+            layout=InputLayout.from_dicts(recv_layout_B, field_layout_B)
+        ),
         interpreter=interpreter4,
-        recv_layout={"recv:dir": 2},  # declare we expect 2-D incoming dir
+        recv_layout=recv_layout_B,  # the same dict used to build the layout
         energy_init=1.0,
         energy_max=1.0,
     )

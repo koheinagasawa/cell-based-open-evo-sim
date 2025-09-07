@@ -3,6 +3,8 @@ import numpy as np
 
 from simulation.cell import Cell
 from simulation.fields import FieldChannel, FieldRouter
+from simulation.input_layout import InputLayout
+from tests.conftest import interpreter4
 
 
 def test_field_deposit_and_decay(world_factory, interpreter4):
@@ -80,9 +82,11 @@ def test_field_gradient_guides_motion(world_factory, interpreter4):
             return {"state": np.zeros(4), "move": np.zeros(2), "emit_field:pher": [1.0]}
 
     class Follower:
+        def __init__(self, layout):
+            self.layout = layout
+
         def activate(self, inputs):
-            # Assume field tail is last; use last 2 dims as 'grad'
-            grad = np.array(inputs)[-2:]
+            grad = self.layout.get_vector(inputs, "field:pher:grad")
             return {"state": np.zeros(4), "move": grad}
 
     A = Cell(
@@ -93,13 +97,14 @@ def test_field_gradient_guides_motion(world_factory, interpreter4):
         recv_layout={},
         field_layout={"field:pher:grad": 2},
     )
+    field_layout_B = {"field:pher:grad": 2}
     B = Cell(
         [1.0, 0.0],
-        Follower(),
+        Follower(layout=InputLayout.from_dicts({}, field_layout_B)),
         interpreter=interpreter4,
         max_neighbors=0,
         recv_layout={},
-        field_layout={"field:pher:grad": 2},
+        field_layout=field_layout_B,
     )
 
     w = world_factory([A, B])
