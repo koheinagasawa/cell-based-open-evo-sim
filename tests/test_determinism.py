@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 from simulation.cell import Cell
+from simulation.fields import FieldChannel, FieldRouter
+from simulation.input_layout import InputLayout
 from simulation.interpreter import SlotBasedInterpreter
 
 
@@ -151,3 +153,119 @@ def test_different_seed_different_result(world_factory):
         np.stack([c.position for c in w1.cells]),
         np.stack([c.position for c in w2.cells]),
     )
+
+
+def test_tail_order_is_key_sorted(world_factory, interpreter4):
+    # Prepare router & channel but we only care about *placement* in inputs
+    fr = FieldRouter(
+        {
+            "b": FieldChannel(name="b", dim_space=2),
+            "a": FieldChannel(name="a", dim_space=2),
+        }
+    )
+
+    class Idle:
+        def activate(self, inputs):
+            return {"state": np.zeros(4), "move": np.zeros(2)}
+
+    c = Cell(
+        [0.0, 0.0],
+        Idle(),
+        interpreter=interpreter4,
+        max_neighbors=0,
+        recv_layout={"recv:z": 3, "recv:a": 2},
+        field_layout={"field:b:val": 1, "field:a:grad": 2},
+    )
+    w = world_factory([c], field_router=fr, use_fields=True)
+
+    # Manually preload inbox and field_inputs to known values
+    c.inbox["recv:a"] = np.array([10, 11])
+    c.inbox["recv:z"] = np.array([20, 21, 22])
+    # field inputs are populated by world.step() -> sample_into_cell
+    w.step()  # fills field_inputs (zeros initially)
+
+    x = c.sense([])  # K=0, tail appended in key-sorted order
+    layout = InputLayout.from_cell(c)
+    tail = layout.split_tail(x)
+
+    # Keys must appear sorted by key string
+    assert list(tail.keys()) == ["recv:a", "recv:z", "field:a:grad", "field:b:val"]
+
+    # And the values must match what we loaded (recv) or zeros (field)
+    assert np.allclose(tail["recv:a"], [10, 11])
+    assert np.allclose(tail["recv:z"], [20, 21, 22])
+    assert tail["field:a:grad"].shape == (2,) and np.allclose(
+        tail["field:a:grad"], [0.0, 0.0]
+    )
+    assert tail["field:b:val"].shape == (1,) and float(tail["field:b:val"][0]) == 0.0
+
+
+def test_fields_only_determinism(world_factory, interpreter4):
+    # Simple emitter-follower; check positions are identical across two runs.
+    fr1 = FieldRouter(
+        {"pher": FieldChannel(name="pher", dim_space=2, sigma=1.0, decay=0.95)}
+    )
+    fr2 = FieldRouter(
+        {"pher": FieldChannel(name="pher", dim_space=2, sigma=1.0, decay=0.95)}
+    )
+
+    class Emitter:
+        def activate(self, inputs):
+            return {"state": np.zeros(4), "move": np.zeros(2), "emit_field:pher": [1.0]}
+
+    class Follower:
+        def __init__(self, layout):
+            self.layout = layout
+
+        def activate(self, inputs):
+            grad = self.layout.get_vector(inputs, "field:pher:grad")
+            return {"state": np.zeros(4), "move": grad}
+
+    field_layout = {"field:pher:grad": 2}
+
+    A1 = Cell(
+        [0.0, 0.0],
+        Emitter(),
+        interpreter=interpreter4,
+        max_neighbors=0,
+        recv_layout={},
+        field_layout=field_layout,
+    )
+    B1 = Cell(
+        [1.0, 0.0],
+        Follower(layout=InputLayout.from_dicts({}, field_layout)),
+        interpreter=interpreter4,
+        max_neighbors=0,
+        recv_layout={},
+        field_layout=field_layout,
+    )
+
+    A2 = Cell(
+        [0.0, 0.0],
+        Emitter(),
+        interpreter=interpreter4,
+        max_neighbors=0,
+        recv_layout={},
+        field_layout={"field:pher:grad": 2},
+    )
+    B2 = Cell(
+        [1.0, 0.0],
+        Follower(layout=InputLayout.from_dicts({}, field_layout)),
+        interpreter=interpreter4,
+        max_neighbors=0,
+        recv_layout={},
+        field_layout=field_layout,
+    )
+
+    w1 = world_factory(
+        [A1, B1], field_router=fr1, use_fields=True, use_neighbors=False, seed=123
+    )
+    w2 = world_factory(
+        [A2, B2], field_router=fr2, use_fields=True, use_neighbors=False, seed=123
+    )
+
+    for _ in range(8):
+        w1.step()
+        w2.step()
+
+    assert np.allclose(B1.position, B2.position)
