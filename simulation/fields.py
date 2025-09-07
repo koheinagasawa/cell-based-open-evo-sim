@@ -65,6 +65,10 @@ class FieldChannel:
                 new_sources.append((p, aa))
         self.sources = new_sources
 
+    def is_active(self) -> bool:
+        """Fast check for whether this channel has any surviving sources."""
+        return bool(self.sources)
+
     def sample(self, position: np.ndarray) -> tuple[float, np.ndarray]:
         """Return (value, grad[D]) at position (R^D)."""
         x = np.asarray(position, dtype=float).ravel()
@@ -107,6 +111,9 @@ class FieldRouter:
     """
 
     channels: Dict[str, FieldChannel]
+    # Lightweight per-step metrics (not persisted)
+    sample_calls: int = 0
+    last_total_sources: int = 0
 
     def sample_into_cell(self, cell) -> None:
         """
@@ -117,6 +124,21 @@ class FieldRouter:
         Unknown channels/keys are zeroed.
         """
         layout: Dict[str, int] = getattr(cell, "field_layout", {}) or {}
+
+        # Fast path: the cell does not declare any field inputs.
+        if not layout:
+            cell.field_inputs = {}
+            return
+
+        # Fast path: no active channels globally -> zero-fill without sampling.
+        # (This avoids O(#channels) Gaussian evaluations per cell.)
+        if not any(ch.is_active() for ch in self.channels.values()):
+            out: Dict[str, np.ndarray] = {}
+            for key, dim in sorted(layout.items()):
+                out[key] = np.zeros(int(dim), dtype=float)
+            cell.field_inputs = out
+            return
+
         out: Dict[str, np.ndarray] = {}
         for key, dim in sorted(layout.items()):
             dim = int(dim)
@@ -135,6 +157,10 @@ class FieldRouter:
                 continue
 
             val, grad = ch.sample(getattr(cell, "position", np.zeros(ch.dim_space)))
+
+            # Count one sampling call (value+grad from the same channel counts as 1)
+            self.sample_calls += 1
+
             if kind == "val":
                 if dim > 0:
                     arr[0] = float(val)
@@ -149,6 +175,9 @@ class FieldRouter:
         cell.field_inputs = out
 
     def apply_decay(self) -> None:
+        # Update per-step aggregate metrics
+        self.last_total_sources = sum(len(ch.sources) for ch in self.channels.values())
+        self.sample_calls = 0
         for ch in self.channels.values():
             ch.apply_decay()
 
