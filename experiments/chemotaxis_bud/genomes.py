@@ -1,5 +1,7 @@
 import numpy as np
 
+from simulation.input_layout import InputLayout
+
 # ---- Simple genomes (declarative IO; no magic indices) ----------------------
 
 
@@ -25,17 +27,27 @@ class FollowerChemotaxisAndBud:
     Bud acceptance is governed by the Bud/Energy policies (thresholds etc.).
     """
 
-    def __init__(self, state_size: int, field_grad_key: str, grad_gain: float = 1.0):
+    def __init__(
+        self,
+        state_size: int,
+        field_grad_key: str,
+        grad_gain: float = 1.0,
+        layout: InputLayout | None = None,
+    ):
         self.S = state_size
         self.field_grad_key = field_grad_key
         self.grad_gain = float(grad_gain)
+        # Optional, declaration-driven slicer. If absent, we fallback to "last 2 dims".
+        self.layout = layout
 
     def activate(self, inputs):
-        # The interpreter/cell composes inputs; tail contains field grad (declared).
-        # We avoid magic indices by slicing from the tail length.
-        x = np.asarray(inputs, dtype=float).ravel()
-        # The last 2 elements are our declared grad (dim=2) by construction here.
-        grad = x[-2:] * self.grad_gain
+        # Prefer declaration-driven slicing by key; fallback to last 2 dims.
+        if self.layout is not None:
+            grad = self.layout.get_vector(inputs, self.field_grad_key)
+        else:
+            x = np.asarray(inputs, dtype=float).ravel()
+            grad = x[-2:]
+        grad = np.asarray(grad, dtype=float) * self.grad_gain
         return {
             "state": np.zeros(self.S),
             "move": grad,

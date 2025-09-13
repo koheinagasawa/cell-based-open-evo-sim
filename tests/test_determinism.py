@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+from experiments.chemotaxis_bud.config import ChemotaxisBudConfig
+from experiments.chemotaxis_bud.runner import run_chemotaxis_bud_experiment
 from simulation.cell import Cell
 from simulation.fields import FieldChannel, FieldRouter
 from simulation.input_layout import InputLayout
@@ -269,3 +271,35 @@ def test_fields_only_determinism(world_factory, interpreter4):
         w2.step()
 
     assert np.allclose(B1.position, B2.position)
+
+
+def test_experiment_determinism(world_factory, test_output_dir):
+    cfg = ChemotaxisBudConfig(
+        steps=40,
+        n_emitters=1,
+        n_followers=10,
+        seed=123,
+        sigma=1.0,
+        decay=0.95,
+        grad_gain=1.0,
+        link_weight=0.8,
+        bidirectional=False,
+        out_dir=str(test_output_dir / "det_run_a"),
+    )
+    res_a = run_chemotaxis_bud_experiment(world_factory, cfg)
+
+    # Run again with the same config to a different directory
+    cfg.out_dir = str(test_output_dir / "det_run_b")
+    res_b = run_chemotaxis_bud_experiment(world_factory, cfg)
+
+    # These arrays must be identical bitwise (exclude step_ms which is wall time)
+    keys = ["t", "births", "alive", "mean_energy", "mean_degree", "mean_radius"]
+    for k in keys:
+        assert np.array_equal(res_a[k], res_b[k]), f"Mismatch in key '{k}'"
+
+    # Causal sanity: on steps where births occur, mean_degree should be non-decreasing
+    births = res_a["births"]
+    deg = res_a["mean_degree"]
+    for i in range(1, len(births)):
+        if births[i] > 0:
+            assert deg[i] >= deg[i - 1] - 1e-12
