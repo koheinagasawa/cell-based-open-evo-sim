@@ -1,0 +1,165 @@
+# experiments/chemotaxis_bud/runner.py
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Dict, List
+
+import numpy as np
+from experiments.chemotaxis_bud.config import ChemotaxisBudConfig
+from experiments.chemotaxis_bud.genomes import (
+    EmitterContinuous,
+    FollowerChemotaxisAndBud,
+)
+from experiments.common.metrics import write_metrics_csv_npz
+
+from simulation.cell import Cell
+from simulation.fields import FieldChannel, FieldRouter
+from simulation.interpreter import SlotBasedInterpreter
+from simulation.policies import ParentChildLinkWrapper, SimpleBudding
+
+
+def _make_interpreter(state_size: int = 4) -> SlotBasedInterpreter:
+    """
+    Interpreter with slots:
+      state: [0:S)
+      move:  [S:S+2)
+      bud:   [S+2]
+    """
+    S = state_size
+    return SlotBasedInterpreter(
+        {
+            "state": slice(0, S),
+            "move": slice(S, S + 2),
+            "bud": S + 2,
+        }
+    )
+
+
+def run_chemotaxis_bud_experiment(
+    world_factory,
+    cfg: ChemotaxisBudConfig,
+) -> Dict[str, np.ndarray]:
+    """
+    Run a small chemotaxis + budding experiment and record metrics.
+    Returns arrays and file paths:
+      t, births, alive, mean_energy, mean_degree, step_ms, csv_path, npz_path
+
+    The world_factory fixture must accept:
+      - field_router=...
+      - use_fields=True/False
+      - use_neighbors=True/False
+      - reproduction_policy=...
+    """
+    rng = np.random.default_rng(cfg.seed)
+    S = 4
+    interp = _make_interpreter(state_size=S)
+
+    # Field setup (2D)
+    channel = FieldChannel(
+        name=cfg.field_name, dim_space=2, sigma=cfg.sigma, decay=cfg.decay
+    )
+    fr = FieldRouter({cfg.field_name: channel})
+
+    # Build cells
+    cells: List[Cell] = []
+
+    # Emitters around origin (or exactly at origin if n_emitters==1)
+    for _ in range(cfg.n_emitters):
+        if cfg.n_emitters == 1:
+            pos = np.array([0.0, 0.0])
+        else:
+            pos = rng.normal(0, 0.25, size=2)
+        cells.append(
+            Cell(
+                position=pos,
+                genome=EmitterContinuous(S, field_key=f"emit_field:{cfg.field_name}"),
+                interpreter=interp,
+                max_neighbors=0,
+                recv_layout={},
+                field_layout={f"field:{cfg.field_name}:val": 1},
+                energy_init=cfg.energy_init,
+                energy_max=cfg.energy_max,
+            )
+        )
+
+    # Followers on a ring
+    radius = 1.5
+    for j in range(cfg.n_followers):
+        ang = 2.0 * np.pi * j / max(1, cfg.n_followers)
+        pos = np.array([radius * np.cos(ang), radius * np.sin(ang)])
+        cells.append(
+            Cell(
+                position=pos,
+                genome=FollowerChemotaxisAndBud(
+                    state_size=S,
+                    field_grad_key=f"field:{cfg.field_name}:grad",
+                    grad_gain=cfg.grad_gain,
+                ),
+                interpreter=interp,
+                max_neighbors=0,
+                recv_layout={},
+                field_layout={f"field:{cfg.field_name}:grad": 2},
+                energy_init=cfg.energy_init,
+                energy_max=cfg.energy_max,
+            )
+        )
+
+    # Parent-child link wrapper on top of SimpleBudding
+    rp = ParentChildLinkWrapper(
+        SimpleBudding(), weight=cfg.link_weight, bidirectional=cfg.bidirectional
+    )
+
+    world = world_factory(
+        cells,
+        field_router=fr,
+        use_fields=True,
+        use_neighbors=False,
+        reproduction_policy=rp,
+        seed=cfg.seed,
+    )
+
+    # Metrics buffers
+    T = int(cfg.steps)
+    t = np.arange(T, dtype=int)
+    births = np.zeros(T, dtype=int)
+    alive = np.zeros(T, dtype=int)
+    mean_energy = np.zeros(T, dtype=float)
+    mean_degree = np.zeros(T, dtype=float)
+    step_ms = np.zeros(T, dtype=float)
+
+    prev_n = len(world.cells)
+    for k in range(T):
+        t0 = time.perf_counter()
+        world.step()
+        step_ms[k] = (time.perf_counter() - t0) * 1000.0
+
+        n = len(world.cells)
+        births[k] = max(0, n - prev_n)
+        alive[k] = n
+        prev_n = n
+
+        # Energy (if present)
+        energies: List[float] = []
+        degrees: List[int] = []
+        for c in world.cells:
+            e = getattr(c, "energy", np.nan)
+            if np.isfinite(e):
+                energies.append(float(e))
+            co = getattr(c, "conn_out", {}) or {}
+            degrees.append(len(co))
+        mean_energy[k] = float(np.mean(energies)) if energies else 0.0
+        mean_degree[k] = float(np.mean(degrees)) if degrees else 0.0
+
+    # Persist results
+    arrays = {
+        "t": t,
+        "births": births,
+        "alive": alive,
+        "mean_energy": mean_energy,
+        "mean_degree": mean_degree,
+        "step_ms": step_ms,
+    }
+    paths = write_metrics_csv_npz(cfg.out_dir, arrays)
+
+    return {**arrays, **paths}

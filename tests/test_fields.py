@@ -310,7 +310,9 @@ def test_field_3d_sampling_smoke(world_factory, interpreter4):
     assert g1[0] < 0.0  # x-gradient points toward E at origin
 
 
-def test_plot_field_scalar_and_quiver_smoke(world_factory, interpreter4, tmp_path):
+def test_plot_field_scalar_and_quiver_smoke(
+    world_factory, interpreter4, test_output_dir
+):
     # Prepare a simple 2D field and a one-shot emitter at origin.
     fr = FieldRouter(
         {"pher": FieldChannel(name="pher", dim_space=2, sigma=1.0, decay=0.95)}
@@ -347,7 +349,7 @@ def test_plot_field_scalar_and_quiver_smoke(world_factory, interpreter4, tmp_pat
     assert float(np.max(arr)) > 0.0
 
     # Save to ensure no I/O or rendering issues occur.
-    out = tmp_path / "field_vis.png"
+    out = test_output_dir / "field_vis.png"
     fig.savefig(out)
     plt.close(fig)
     assert out.exists() and out.stat().st_size > 0

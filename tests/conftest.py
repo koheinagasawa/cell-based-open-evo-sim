@@ -1,8 +1,10 @@
 import os
 import pathlib
 import re
+import shutil
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 import numpy as np
@@ -19,25 +21,69 @@ try:
 except Exception:
     FieldRouter = object  # type: ignore
 
-
 # ---------------------------
 # Shared fixtures
 # ---------------------------
-@pytest.fixture(scope="session")
-def session_run_dir():
-    """Create a single output directory per pytest session and export it via env var.
-    Example: outputs/pytest_YYYYmmdd_HHMMSS_<8hex>/
-    """
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    short = uuid.uuid4().hex[:8]
-    root = pathlib.Path("outputs")
-    root.mkdir(parents=True, exist_ok=True)
-    session_dir = root / f"pytest_{stamp}_{short}"
-    session_dir.mkdir(parents=True, exist_ok=True)
 
-    # Make it available to any code via environment variable (fallback path)
-    os.environ["ALIFE_OUTPUT_SESSION_DIR"] = str(session_dir)
-    return str(session_dir)
+# -----------------------------------------------------------------------------
+# Output management: force all test artifacts under ./output/
+# -----------------------------------------------------------------------------
+
+
+def _make_run_root() -> Path:
+    """
+    Create ./outputs/pytest_YYYYMMDD_HHMMSS_<8hex> exactly once per pytest run.
+    All per-test directories are created under this single run root.
+    """
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    suffix = uuid.uuid4().hex[:8]
+    root = Path("outputs") / f"pytest_{ts}_{suffix}"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+@pytest.fixture(scope="session")
+def run_output_root() -> Path:
+    """Canonical session-wide run directory: ./outputs/pytest_..."""
+    return _make_run_root()
+
+
+# --- Backward-compat aliases (all point to the same run folder) -------------
+@pytest.fixture(scope="session")
+def session_run_dir(run_output_root: Path) -> Path:
+    return run_output_root
+
+
+@pytest.fixture(scope="session")
+def outputs_session_root(run_output_root: Path) -> Path:
+    return run_output_root
+
+
+@pytest.fixture(scope="session")
+def output_root(run_output_root: Path) -> Path:
+    return run_output_root
+
+
+@pytest.fixture
+def test_output_dir(run_output_root: Path, request) -> Path:
+    """
+    Per-test directory under the single run root:
+      ./outputs/pytest_.../<sanitized-test-name>
+    Ensures a clean directory for each test invocation.
+    """
+    name = request.node.name  # e.g., test_run_chemotaxis_bud_experiment_smoke
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name)[:64]
+    d = run_output_root / safe
+    if d.exists():
+        # Clean previous contents
+        for child in d.iterdir():
+            if child.is_file() or child.is_symlink():
+                child.unlink(missing_ok=True)  # Py3.8+: remove try/except if needed
+            else:
+                shutil.rmtree(child)
+    else:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 @pytest.fixture(scope="session")
