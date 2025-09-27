@@ -105,12 +105,33 @@ def test_grid_sweep_smoke(world_factory, test_output_dir):
     )
 
     sweep_root = test_output_dir / "sweep"
+
+    def runner(cfg):
+        return run_chemotaxis_bud_experiment(world_factory, cfg)
+
+    summary_keys = [
+        "final_alive",
+        "total_births",
+        "mean_step_ms",
+        "mean_radius",
+    ]
+
+    def summary_fn(res):
+        final_alive = float(res["alive"][-1]) if len(res["alive"]) else 0.0
+        total_births = float(np.sum(res["births"])) if len(res["births"]) else 0.0
+        mean_step_ms = float(np.mean(res["step_ms"])) if len(res["step_ms"]) else 0.0
+        mean_radius = float(res["mean_radius"][-1]) if len(res["mean_radius"]) else 0.0
+        return [final_alive, total_births, mean_step_ms, mean_radius]
+
     summary = run_grid(
-        world_factory,
         base_cfg=base,
         axes={"decay": [0.9, 0.95], "sigma": [0.8, 1.2]},
         out_dir=sweep_root,
+        runner=runner,
+        summary_keys=summary_keys,
+        summary_fn=summary_fn,
     )
+
     # Summary.csv exists with expected number of rows (product of axes)
     p = Path(summary)
     assert p.exists()
