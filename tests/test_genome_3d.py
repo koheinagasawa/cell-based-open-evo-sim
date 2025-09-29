@@ -1,6 +1,6 @@
 import numpy as np
 
-import tests.utils.visualization as vis
+import tests.utils.visualization3d as vis
 from simulation.cell import Cell
 from simulation.interpreter import SlotBasedInterpreter
 

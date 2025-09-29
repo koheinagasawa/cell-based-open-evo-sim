@@ -6,7 +6,7 @@ from simulation.cell import Cell
 from simulation.fields import FieldChannel, FieldRouter
 from simulation.input_layout import InputLayout
 from tests.conftest import interpreter4
-from tests.utils.visualization import plot_field_scalar_and_quiver
+from tests.utils.visualization2d import plot_field_scalar_and_quiver
 
 
 def test_field_deposit_and_decay(world_factory, interpreter4):

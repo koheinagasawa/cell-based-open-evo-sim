@@ -2,7 +2,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-import tests.utils.visualization as vis
+import tests.utils.visualization2d as vis
 from simulation.cell import Cell
 from simulation.input_layout import InputLayout
 from simulation.interpreter import SlotBasedInterpreter

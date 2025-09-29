@@ -1,11 +1,25 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from typing import Iterable, List, Optional, Tuple
+import hashlib
+import math
+import os
+from collections import defaultdict, deque
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
+
+# Type hints for clarity
+CellId = str
+Pos = Tuple[float, float]
+Edge = Tuple[CellId, CellId, float]  # (a, b, weight)
+
+
+def _short_id(sid: str, n: int = 6) -> str:
+    """Shorten a cell id for legend/label use."""
+    sid = str(sid)
+    return sid if len(sid) <= n else sid[:n]
 
 
 # ---- helper: group positions by cell in 2D ---------------------------------
@@ -62,7 +76,7 @@ def plot_state_trajectories(recorder, show=True):
     by_cell = defaultdict(list)
     for row in rows:
         t = int(row[0])
-        cid = row[1][:6]  # use first 6 chars for brevity
+        cid = _short_id(row[1])
         s = np.asarray(row[2:], dtype=float)
         by_cell[cid].append((t, s))
 
@@ -73,8 +87,6 @@ def plot_state_trajectories(recorder, show=True):
         T = np.array([t for t, _ in lst], dtype=int)
         S = np.vstack([s for _, s in lst])  # (T, state_dim)
         series.append((cid, T, S))
-
-    import math
 
     n = len(series)
     fig, axes = plt.subplots(n, 1, figsize=(8, 2.6 * n), sharex=True)
@@ -110,7 +122,7 @@ def plot_2D_position_trajectories(
         if len(row) < 4:  # need at least t, id, x, y
             continue
         t = int(row[0])
-        cid = row[1][:6]  # use first 6 chars for brevity
+        cid = _short_id(row[1])
         x = float(row[2])
         y = float(row[3])
         by_cell[cid].append((t, x, y))
@@ -158,7 +170,7 @@ def plot_quiver_last_step(recorder, show=True, equal_aspect=True, scale=None):
             continue
 
         # Use first 6 chars of the id, keep consistent with other plots
-        cid6 = str(cid_full)[:6]
+        cid6 = _short_id(CellId(cid_full))
 
         # Draw trajectory line and record its color for the arrow
         (line_handle,) = ax.plot(X, Y, linewidth=1.5, label=f"cell {cid6}")
@@ -212,7 +224,7 @@ def plot_quiver_along_trajectories(
     stride = max(int(arrow_stride), 1)
 
     for cid_full, (T, X, Y) in data.items():
-        cid6 = str(cid_full)[:6]
+        cid6 = _short_id(CellId(cid_full))
         # Draw the trajectory with label (legend comes from these lines)
         (line_handle,) = ax.plot(X, Y, linewidth=1.5, label=f"cell {cid6}")
         color = line_handle.get_color()
@@ -246,73 +258,6 @@ def plot_quiver_along_trajectories(
     ax.legend(loc="best", fontsize=8)
     if equal_aspect:
         ax.set_aspect("equal", adjustable="box")
-    fig.tight_layout()
-    if show:
-        plt.show()
-    return fig, ax
-
-
-def plot_3d_position_trajectories(
-    recorder, show=True, mark_start_end=True, equal_aspect=True
-):
-    """Draw 3D trajectories from recorder.positions rows: [t, cell_id, x, y, z, ...]."""
-
-    rows = getattr(recorder, "positions", None) or []
-    if not rows:
-        print("No position data to plot.")
-        return
-
-    by_cell = defaultdict(list)
-    for row in rows:
-        if len(row) < 5:
-            continue
-        t = int(row[0])
-        cid = row[1][:6]  # use first 6 chars for brevity
-        x = float(row[2])
-        y = float(row[3])
-        z = float(row[4])
-        by_cell[cid].append((t, x, y, z))
-
-    series = []
-    for cid, lst in by_cell.items():
-        lst.sort(key=lambda r: r[0])
-        X = np.array([x for _, x, _, _ in lst], dtype=float)
-        Y = np.array([y for _, _, y, _ in lst], dtype=float)
-        Z = np.array([z for _, _, _, z in lst], dtype=float)
-        series.append((cid, X, Y, Z))
-
-    fig = plt.figure(figsize=(7, 6))
-    ax = fig.add_subplot(111, projection="3d")
-    for cid, X, Y, Z in series:
-        ax.plot(X, Y, Z, linewidth=1.5, label=f"cell {cid}")
-        if mark_start_end and X.size:
-            ax.scatter([X[0]], [Y[0]], [Z[0]], marker="o", s=30)  # start
-            ax.scatter([X[-1]], [Y[-1]], [Z[-1]], marker="*", s=80)  # end
-
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best", fontsize=8)
-
-    if equal_aspect and series:
-        # Simple equal aspect: set symmetric limits around data centroid
-        allX = np.concatenate([s[1] for s in series])
-        allY = np.concatenate([s[2] for s in series])
-        allZ = np.concatenate([s[3] for s in series])
-        cx, cy, cz = np.mean(allX), np.mean(allY), np.mean(allZ)
-        r = (
-            max(
-                allX.max() - allX.min(),
-                allY.max() - allY.min(),
-                allZ.max() - allZ.min(),
-            )
-            * 0.5
-        )
-        ax.set_xlim(cx - r, cx + r)
-        ax.set_ylim(cy - r, cy + r)
-        ax.set_zlim(cz - r, cz + r)
-
     fig.tight_layout()
     if show:
         plt.show()
@@ -389,7 +334,7 @@ def animate_2D_position_trajectories(
     # Sort by id for stable color assignment across runs
     artists: dict[str, dict] = {}
     for cid, (T, X, Y) in sorted(data.items(), key=lambda kv: str(kv[0])):
-        label_cid = str(cid)
+        label_cid = CellId(cid)
         if (
             isinstance(label_shorten, int)
             and label_shorten > 0
@@ -680,10 +625,6 @@ def draw_connections(
         h = abs(hash(sid))
         return colors[h % len(colors)]
 
-    def _short_id(sid: str, n: int = 4) -> str:
-        s = str(sid)
-        return s if len(s) <= n else s[-n:]
-
     artists: List = []  # edge artists (returned)
     text_artists: List = []  # node/weight labels (not returned)
     pts = []  # collect endpoints for autoscale
@@ -869,3 +810,164 @@ def plot_field_scalar_and_quiver(
     ax.quiver(XX, YY, GX, GY, angles="xy", scale_units="xy", scale=1.0, width=0.002)
     ax.set_title(f"Field '{channel}': value (imshow) & grad (quiver)")
     return im
+
+
+def _id_to_color_index(cell_id: CellId, n_colors: int = 256) -> int:
+    """Stable color index from a cell id using a short hash."""
+    h = hashlib.sha1(cell_id.encode("utf-8")).digest()
+    return h[0] % n_colors
+
+
+def _edges_to_lines(ax, edges, id2pos, max_w=3.0, edge_color=(1.0, 1.0, 1.0)):
+    """Draw edges with weight-based alpha/linewidth and fixed color."""
+    artists = []
+    for a, b, w in edges:
+        pa = id2pos.get(a)
+        pb = id2pos.get(b)
+        if pa is None or pb is None:
+            continue
+        weight = 0.0 if w is None else float(w)
+        weight01 = max(0.0, min(1.0, weight))
+        lw = 0.5 + (max_w - 0.5) * weight01
+        alpha = 0.15 + 0.65 * weight01
+        (ln,) = ax.plot(
+            [pa[0], pb[0]], [pa[1], pb[1]], linewidth=lw, alpha=alpha, color=edge_color
+        )
+        artists.append(ln)
+    return artists
+
+
+def animate_field_cells_connections(
+    out_path: str,
+    field_frames: List[np.ndarray],  # each: (H, W) float array
+    cell_frames: List[Dict[CellId, Pos]],  # each: {id: (x, y)}
+    edge_frames: Optional[List[List[Edge]]] = None,  # each: [(id_a, id_b, weight)]
+    *,
+    fps: int = 15,
+    trail_len: int = 30,
+    figsize: Tuple[int, int] = (6, 6),
+    cmap: str = "viridis",
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    show_colorbar: bool = False,
+) -> str:
+    """
+    Create a single GIF that overlays:
+      - Field heatmap
+      - Cell connections (weighted lines)
+      - Cell positions (stable color per id)
+      - Motion trails (last 'trail_len' positions)
+
+    Inputs are parallel lists with the same length (T frames).
+    """
+    assert len(field_frames) == len(
+        cell_frames
+    ), "field_frames and cell_frames length mismatch"
+    T = len(field_frames)
+    if edge_frames is None:
+        edge_frames = [[] for _ in range(T)]
+    else:
+        assert len(edge_frames) == T, "edge_frames length mismatch"
+
+    # Compute field range if not provided
+    if vmin is None or vmax is None:
+        all_vals = np.concatenate([f.ravel() for f in field_frames])
+        if vmin is None:
+            vmin = float(np.nanpercentile(all_vals, 2))
+        if vmax is None:
+            vmax = float(np.nanpercentile(all_vals, 98))
+        if math.isclose(vmin, vmax):
+            vmax = vmin + 1e-6
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    plt.tight_layout()
+    im = ax.imshow(
+        field_frames[0],
+        origin="lower",
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        interpolation="nearest",
+    )
+    if show_colorbar:
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # Visual state
+    trails: Dict[CellId, deque] = defaultdict(lambda: deque(maxlen=trail_len))
+    scat = None
+    trail_artists: Dict[CellId, any] = {}
+    edge_artists: List[any] = []
+    n_color_bins = 256
+    cmap_obj = plt.get_cmap(cmap, n_color_bins)
+
+    def update(frame_idx: int):
+        nonlocal scat, edge_artists
+
+        # Update background field
+        im.set_data(field_frames[frame_idx])
+
+        # Build per-frame positions and keep trails
+        id2pos = cell_frames[frame_idx]
+        xs, ys, cs = [], [], []
+
+        # update trails first
+        for cid, p in id2pos.items():
+            trails[cid].append(p)
+
+        # draw trails (as thin lines)
+        for cid, dq in trails.items():
+            if len(dq) < 2:
+                continue
+            if cid not in trail_artists:
+                # init a line artist for this id
+                (line,) = ax.plot([], [], linewidth=1.0, alpha=0.5)
+                trail_artists[cid] = line
+            line = trail_artists[cid]
+            tx, ty = zip(*dq)
+            line.set_data(tx, ty)
+            # set consistent color by id
+            color_idx = _id_to_color_index(cid, n_color_bins)
+            line.set_color(cmap_obj(color_idx))
+
+        # draw nodes (scatter)
+        for cid, (x, y) in id2pos.items():
+            xs.append(x)
+            ys.append(y)
+            color_idx = _id_to_color_index(cid, n_color_bins)
+            cs.append(color_idx)
+        if scat is None:
+            scat = ax.scatter(
+                xs,
+                ys,
+                s=18,
+                c=cs,
+                cmap=cmap_obj,
+                vmin=0,
+                vmax=n_color_bins - 1,
+                edgecolors="k",
+                linewidths=0.25,
+            )
+        else:
+            scat.set_offsets(np.column_stack([xs, ys]) if xs else np.zeros((0, 2)))
+            if xs:
+                scat.set_array(np.array(cs, dtype=float))  # map to colormap bins
+
+        # connections
+        # remove old artists
+        for art in edge_artists:
+            try:
+                art.remove()
+            except Exception:
+                pass
+        edge_artists = _edges_to_lines(ax, edge_frames[frame_idx], id2pos, max_w=3.0)
+
+        ax.set_title(f"t = {frame_idx}")
+        return [im, scat, *trail_artists.values(), *edge_artists]
+
+    anim = FuncAnimation(fig, update, frames=T, interval=1000 / fps, blit=False)
+    writer = PillowWriter(fps=fps)
+    anim.save(out_path, writer=writer)
+    plt.close(fig)
+    return out_path
