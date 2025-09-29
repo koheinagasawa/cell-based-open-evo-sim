@@ -12,6 +12,7 @@ from experiments.chemotaxis_bud.genomes import (
     EmitterContinuous,
     FollowerChemotaxisAndBud,
 )
+from experiments.common.event_logger import EventLogger
 from experiments.common.metrics import write_metrics_csv_npz
 from simulation.cell import Cell
 from simulation.fields import FieldChannel, FieldRouter
@@ -115,6 +116,8 @@ def run_chemotaxis_bud_experiment(
         SimpleBudding(), weight=cfg.link_weight, bidirectional=cfg.bidirectional
     )
 
+    event_logger = EventLogger(cfg.out_dir)
+
     world = world_factory(
         cells,
         field_router=fr,
@@ -122,6 +125,13 @@ def run_chemotaxis_bud_experiment(
         use_neighbors=False,
         reproduction_policy=rp,
         seed=cfg.seed,
+        birth_callback=lambda w, info: event_logger.log_birth(
+            w.time,
+            info.get("parent").id if info.get("parent") else None,
+            info["child"].id,
+            info["child"].position,
+            info.get("metadata", {}).get("link_weight"),
+        ),
     )
 
     # --- Identify the initial follower cohort (exclude emitters) ------------
@@ -197,5 +207,7 @@ def run_chemotaxis_bud_experiment(
             "mean_radius",
         ),
     )
+
+    paths["events_csv_path"] = event_logger.write_csv("events.csv")
 
     return {**arrays, **paths}

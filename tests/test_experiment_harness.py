@@ -25,12 +25,17 @@ def test_run_chemotaxis_bud_experiment_smoke(world_factory, test_output_dir):
     result = run_chemotaxis_bud_experiment(world_factory, cfg)
 
     # Files exist and have content
-    assert "csv_path" in result and "npz_path" in result
+    assert (
+        "metrics_csv_path" in result
+        and "metrics_npz_path" in result
+        and "events_csv_path" in result
+    )
     assert (test_output_dir / "exp" / "metrics.csv").exists()
     assert (test_output_dir / "exp" / "metrics.npz").exists()
+    assert (test_output_dir / "exp" / "events.csv").exists()
 
-    # CSV header sanity
-    with open(result["csv_path"], newline="") as f:
+    # Metrics CSV header sanity
+    with open(result["metrics_csv_path"], newline="") as f:
         r = csv.reader(f)
         header = next(r)
         assert header == [
@@ -45,11 +50,24 @@ def test_run_chemotaxis_bud_experiment_smoke(world_factory, test_output_dir):
         rows = list(r)
         assert len(rows) == cfg.steps
 
-    # NPZ sanity
-    data = np.load(result["npz_path"])
+    # Metrics NPZ sanity
+    data = np.load(result["metrics_npz_path"])
     assert data["t"].shape[0] == cfg.steps
     assert data["alive"].shape == data["t"].shape
     assert np.all(data["births"] >= 0)
+
+    # Events CSV header sanity
+    with open(result["events_csv_path"], newline="") as f:
+        r = csv.reader(f)
+        header = next(r)
+        assert header == [
+            "time_step",
+            "parent_id",
+            "child_id",
+            "x",
+            "y",
+            "link_weight",
+        ]
 
 
 def test_followers_mean_radius_trend(world_factory, test_output_dir):

@@ -37,7 +37,7 @@ def write_metrics_csv_npz(
     Extra keys are stored in NPZ only.
 
     Returns:
-      {"csv_path": str, "npz_path": str}
+      {"metrics_csv_path": str, "metrics_npz_path": str}
     """
     out_path = ensure_dir(out_dir)
     csv_path = out_path / csv_name
@@ -67,7 +67,7 @@ def write_metrics_csv_npz(
     # Convert to plain numpy arrays for safety
     np.savez_compressed(npz_path, **{k: np.asarray(v) for k, v in arrays.items()})
 
-    return {"csv_path": str(csv_path), "npz_path": str(npz_path)}
+    return {"metrics_csv_path": str(csv_path), "metrics_npz_path": str(npz_path)}
 
 
 def to_scalar(x):

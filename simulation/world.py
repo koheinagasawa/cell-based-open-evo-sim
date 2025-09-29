@@ -1,6 +1,6 @@
 import hashlib
 import struct
-from typing import Any, Callable, Dict, Protocol
+from typing import Any, Callable, Dict, Optional, Protocol
 
 import numpy as np
 
@@ -53,6 +53,9 @@ def _align_vec(vec, target_dim: int) -> np.ndarray:
     return a[:target_dim]
 
 
+BirthCallback = Callable[["World", Dict[str, Any]], None]
+
+
 class World:
     supported_actions = ["move", "bud"]
 
@@ -69,6 +72,7 @@ class World:
         use_neighbors: bool = True,
         field_router: FieldRouter | None = None,
         use_fields: bool = False,
+        birth_callback: Optional[BirthCallback] = None,
     ):
         """
         :param seed: master seed for reproducible experiments. If None, use 0.
@@ -105,6 +109,8 @@ class World:
         # Policies (thin, swappable)
         self.energy_policy = energy_policy
         self.reproduction_policy = reproduction_policy
+        self._birth_callback: Optional[BirthCallback] = birth_callback
+
         # Use provided lifecycle policy or a no-op fallback to keep behavior unchanged.
         self.lifecycle_policy = lifecycle_policy or _NoDeath()
 
@@ -252,8 +258,11 @@ class World:
 
         # --------  Phase 4.3: attach newborns (they do NOT pay maintenance this frame) --------
         if self._spawn_buffer:
-            for newborn in self._spawn_buffer:
-                self.add_cell(newborn)
+            for info in self._spawn_buffer:
+                child = info["child"]
+                self.add_cell(child)
+                if self._birth_callback is not None:
+                    self._birth_callback(self, info)
             self._spawn_buffer.clear()
 
         # --------  Phase 5: Connected messaging & Field routing (NEXT frame) --------
@@ -275,9 +284,19 @@ class World:
         d = _align_vec(delta, int(cell.position.shape[0]))
         cell.position += d
 
-    def apply_bud(self, cell, value):
+    def apply_bud(self, parent, value):
         """Delegate budding to the injected reproduction policy."""
-        self.reproduction_policy.apply(self, cell, value, self._spawn_buffer.append)
+
+        def _spawn(child, parent, metadata=None):
+            self._spawn_buffer.append(
+                {
+                    "child": child,
+                    "parent": parent,
+                    "metadata": metadata or {},
+                }
+            )
+
+        self.reproduction_policy.apply(self, parent, value, _spawn)
 
     def noop(self, cell, value):
         # No-op action handler

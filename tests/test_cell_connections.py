@@ -504,7 +504,7 @@ def test_birth_hook_inherits_connections(world_factory, interpreter4):
                 recv_layout=getattr(parent, "recv_layout", {}),
             )
             child.state = parent.state.copy()
-            spawn_fn(child)  # append via world’s spawn buffer
+            spawn_fn(child, parent)  # append via world’s spawn buffer
             if callable(self.on_birth):
                 self.on_birth(parent, child, world)
             self._done = True

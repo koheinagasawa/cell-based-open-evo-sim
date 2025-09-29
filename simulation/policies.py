@@ -74,7 +74,7 @@ class SimpleBudding:
             energy_max=float(getattr(parent, "energy_max", 1.0)),
         )
         # RNG will be attached by the world; newborn does not pay maintenance this frame.
-        spawn_fn(baby)
+        spawn_fn(baby, parent)
 
         # Call optional birth hook (after child exists, before step ends)
         if self.init_child is not None:
@@ -103,7 +103,7 @@ class ParentChildLinkWrapper:
     def apply(self, world, parent, value, spawn_cb):
         """Delegate to base policy while injecting the link after child creation."""
 
-        def _spawn(child):
+        def _spawn(child, parent, metadata=None):
             # Create parent -> child link
             try:
                 parent.set_connections([(child.id, self.weight)])
@@ -118,7 +118,11 @@ class ParentChildLinkWrapper:
                     raise RuntimeError(f"Failed to set child->parent connection: {e}")
 
             # Forward to world spawn buffer
-            spawn_cb(child)
+            meta = dict(metadata or {})
+            meta.setdefault("link_weight", self.weight)
+            if self.bidirectional:
+                meta.setdefault("bidirectional", True)
+            spawn_cb(child, parent, meta)
 
         # Call base policy with our intercepted spawn
         return self.base_policy.apply(world, parent, value, _spawn)

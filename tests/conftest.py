@@ -139,6 +139,7 @@ def world_factory() -> Callable[..., World]:
         use_neighbors: bool = True,
         field_router=None,
         use_fields: bool = False,
+        birth_callback: Optional[Callable[[World, Dict[str, Any]], None]] = None,
     ) -> World:
         return World(
             cells,
@@ -151,6 +152,7 @@ def world_factory() -> Callable[..., World]:
             use_neighbors=use_neighbors,
             field_router=field_router,
             use_fields=use_fields,
+            birth_callback=birth_callback,
         )
 
     return _factory
