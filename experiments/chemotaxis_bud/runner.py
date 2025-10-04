@@ -1,8 +1,8 @@
-# experiments/chemotaxis_bud/runner.py
+# experiments/chemotaxis_bud/metrics_hooks.py
 from __future__ import annotations
 
-import time
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -11,208 +11,152 @@ from experiments.chemotaxis_bud.genomes import (
     EmitterContinuous,
     FollowerChemotaxisAndBud,
 )
-from experiments.common.event_logger import EventLogger
-from experiments.common.frame_dumper import FrameDumper
-from experiments.common.metrics import write_metrics_csv_npz
-from simulation.cell import Cell
-from simulation.fields import FieldChannel, FieldRouter
-from simulation.input_layout import InputLayout
+from experiments.common.experiment_spec import (
+    ExperimentSpec,
+    FieldChannelSpec,
+    PopulationSpec,
+)
+from experiments.common.metrics_hook import MetricsHook
 from simulation.interpreter import SlotBasedInterpreter
 from simulation.policies import ParentChildLinkWrapper, SimpleBudding
 
+CenterFunc = Callable[[object], Tuple[float, float]]
 
-def _make_interpreter(state_size: int = 4) -> SlotBasedInterpreter:
+
+class MeanRadiusHook(MetricsHook):
     """
-    Interpreter with slots:
-      state: [0:S)
-      move:  [S:S+2)
-      bud:   [S+2]
+    Compute mean distance of all cells from a given center per step.
+    Center can be a fixed point or a function of world (e.g., emitter centroid).
     """
-    S = state_size
-    return SlotBasedInterpreter(
-        {
-            "state": slice(0, S),
-            "move": slice(S, S + 2),
-            "bud": S + 2,
-        }
-    )
 
+    def __init__(
+        self,
+        center: Optional[Tuple[float, float]] = (0.0, 0.0),
+        center_func: Optional[CenterFunc] = None,
+        name: str = "mean_radius",
+    ):
+        self.center = center
+        self.center_func = center_func
+        self.name = name
 
-def run_chemotaxis_bud_experiment(
-    world_factory,
-    cfg: ChemotaxisBudConfig,
-) -> Dict[str, np.ndarray]:
-    """
-    Run a small chemotaxis + budding experiment and record metrics.
-    Returns arrays and file paths:
-      t, births, alive, mean_energy, mean_degree, step_ms, csv_path, npz_path
+    def _get_center(self, world) -> Tuple[float, float]:
+        if self.center_func is not None:
+            try:
+                cx, cy = self.center_func(world)
+                return float(cx), float(cy)
+            except Exception:
+                pass
+        if self.center is not None:
+            return float(self.center[0]), float(self.center[1])
+        # fallback: origin
+        return 0.0, 0.0
 
-    The world_factory fixture must accept:
-      - field_router=...
-      - use_fields=True/False
-      - use_neighbors=True/False
-      - reproduction_policy=...
-    """
-    rng = np.random.default_rng(cfg.seed)
-    S = 4
-    interp = _make_interpreter(state_size=S)
+    def begin(self, world) -> None:
+        pass
 
-    # Field setup (2D)
-    channel = FieldChannel(
-        name=cfg.field_name, dim_space=2, sigma=cfg.sigma, decay=cfg.decay
-    )
-    fr = FieldRouter({cfg.field_name: channel})
-
-    # Build cells
-    cells: List[Cell] = []
-
-    # Emitters around origin (or exactly at origin if n_emitters==1)
-    for _ in range(cfg.n_emitters):
-        if cfg.n_emitters == 1:
-            pos = np.array([0.0, 0.0])
-        else:
-            pos = rng.normal(0, 0.25, size=2)
-        cells.append(
-            Cell(
-                position=pos,
-                genome=EmitterContinuous(S, field_key=f"emit_field:{cfg.field_name}"),
-                interpreter=interp,
-                max_neighbors=0,
-                recv_layout={},
-                field_layout={f"field:{cfg.field_name}:val": 1},
-                energy_init=cfg.energy_init,
-                energy_max=cfg.energy_max,
-            )
+    def on_step(self, world, step_index: int) -> Dict[str, float]:
+        cells = (
+            getattr(world, "cells", None) or getattr(world, "get_cells", lambda: None)()
         )
+        if not cells:
+            return {self.name: 0.0}
+        cx, cy = self._get_center(world)
+        dists = []
+        for c in cells:
+            p = np.asarray(getattr(c, "position"), dtype=float).ravel()
+            x = float(p[0])
+            y = float(p[1] if p.size > 1 else 0.0)
+            d = np.hypot(x - cx, y - cy)
+            if np.isfinite(d):
+                dists.append(d)
+        val = float(np.mean(dists)) if dists else 0.0
+        return {self.name: val}
+
+    def end(self):
+        return None
+
+
+def make_spec(cfg: ChemotaxisBudConfig, world_factory) -> ExperimentSpec:
+    S = cfg.state_size
+
+    def interpreter_factory():
+        # state: [0:S), move: [S:S+2), bud: [S+2]
+        return SlotBasedInterpreter(
+            {"state": slice(0, S), "move": slice(S, S + 2), "bud": S + 2}
+        )
+
+    # Emitters around origin (if >1, add small noise)
+    def emitter_pos(i: int) -> Tuple[float, float]:
+        if cfg.n_emitters == 1:
+            return (0.0, 0.0)
+        rng = np.random.default_rng(cfg.seed + i)
+        xy = rng.normal(0, 0.25, size=2)
+        return float(xy[0]), float(xy[1])
 
     # Followers on a ring
-    radius = 1.5
-    for j in range(cfg.n_followers):
-        ang = 2.0 * np.pi * j / max(1, cfg.n_followers)
-        pos = np.array([radius * np.cos(ang), radius * np.sin(ang)])
-        # Declare the follower's field layout once, and derive a layout helper from it.
-        follower_field_layout = {f"field:{cfg.field_name}:grad": 2}
-        follower_layout = InputLayout.from_dicts({}, follower_field_layout)
-        cells.append(
-            Cell(
-                position=pos,
-                genome=FollowerChemotaxisAndBud(
-                    state_size=S,
-                    field_grad_key=f"field:{cfg.field_name}:grad",
-                    grad_gain=cfg.grad_gain,
-                    layout=follower_layout,
-                ),
-                interpreter=interp,
-                max_neighbors=0,
-                recv_layout={},
-                field_layout=follower_field_layout,
-                energy_init=cfg.energy_init,
-                energy_max=cfg.energy_max,
-            )
+    R = 1.5
+
+    def follower_pos(i: int) -> Tuple[float, float]:
+        ang = 2.0 * np.pi * i / max(1, cfg.n_followers)
+        return float(R * np.cos(ang)), float(R * np.sin(ang))
+
+    follower_field_layout = {f"field:{cfg.field_name}:grad": 2}
+
+    pops = []
+    pops.append(
+        PopulationSpec(
+            count=cfg.n_emitters,
+            positioner=emitter_pos,
+            genome_factory=lambda: EmitterContinuous(
+                S, field_key=f"emit_field:{cfg.field_name}"
+            ),
+            recv_layout={},
+            field_layout={f"field:{cfg.field_name}:val": 1},
+            energy_init=cfg.energy_init,
+            energy_max=cfg.energy_max,
+            max_neighbors=0,
+        )
+    )
+    pops.append(
+        PopulationSpec(
+            count=cfg.n_followers,
+            positioner=follower_pos,
+            genome_factory=lambda: FollowerChemotaxisAndBud(
+                state_size=S,
+                field_grad_key=f"field:{cfg.field_name}:grad",
+                grad_gain=cfg.grad_gain,
+                layout=None,  # genomes internally create layout if needed
+            ),
+            recv_layout={},
+            field_layout=follower_field_layout,
+            energy_init=cfg.energy_init,
+            energy_max=cfg.energy_max,
+            max_neighbors=0,
+        )
+    )
+
+    def policy_factory():
+        return ParentChildLinkWrapper(
+            SimpleBudding(), weight=cfg.link_weight, bidirectional=cfg.bidirectional
         )
 
-    # Parent-child link wrapper on top of SimpleBudding
-    rp = ParentChildLinkWrapper(
-        SimpleBudding(), weight=cfg.link_weight, bidirectional=cfg.bidirectional
-    )
+    mean_r = MeanRadiusHook(center=(0.0, 0.0), name="mean_radius")
 
-    event_logger = EventLogger(cfg.out_dir)
-
-    frame_dumper = FrameDumper()
-
-    world = world_factory(
-        cells,
-        field_router=fr,
+    return ExperimentSpec(
+        out_dir=cfg.out_dir,
+        steps=cfg.steps,
+        seed=cfg.seed,
+        world_factory=world_factory,
+        interpreter_factory=interpreter_factory,
+        field_channels=[
+            FieldChannelSpec(name=cfg.field_name, sigma=cfg.sigma, decay=cfg.decay)
+        ],
+        populations=pops,
+        policy_factory=policy_factory,
         use_fields=True,
         use_neighbors=False,
-        reproduction_policy=rp,
-        seed=cfg.seed,
-        birth_callback=lambda w, info: event_logger.log_birth(
-            w.time,
-            info.get("parent").id if info.get("parent") else None,
-            info["child"].id,
-            info["child"].position,
-            info.get("metadata", {}).get("link_weight"),
-        ),
+        dump_frames=True,
+        sample_every=cfg.sample_every,
+        log_events=True,
+        metric_hooks=[mean_r],
     )
-
-    # --- Identify the initial follower cohort (exclude emitters) ------------
-    cohort_ids = {
-        c.id for c in world.cells if c.genome.__class__.__name__ != "EmitterContinuous"
-    }
-
-    # Metrics buffers
-    T = int(cfg.steps)
-    t = np.arange(T, dtype=int)
-    births = np.zeros(T, dtype=int)
-    alive = np.zeros(T, dtype=int)
-    mean_energy = np.zeros(T, dtype=float)
-    mean_degree = np.zeros(T, dtype=float)
-    step_ms = np.zeros(T, dtype=float)
-    mean_radius = np.zeros(T, dtype=float)
-
-    prev_n = len(world.cells)
-    for k in range(T):
-        t0 = time.perf_counter()
-        world.step()
-        step_ms[k] = (time.perf_counter() - t0) * 1000.0
-
-        n = len(world.cells)
-        births[k] = max(0, n - prev_n)
-        alive[k] = n
-        prev_n = n
-
-        # Energy (if present)
-        energies: List[float] = []
-        degrees: List[int] = []
-        radii: List[float] = []
-        for c in world.cells:
-            e = getattr(c, "energy", np.nan)
-            if np.isfinite(e):
-                energies.append(float(e))
-            co = getattr(c, "conn_out", {}) or {}
-            degrees.append(len(co))
-            # Track radius for the *initial follower cohort only*.
-            # Children are intentionally excluded to avoid bias from bud offsets.
-            if c.id in cohort_ids:
-                try:
-                    r = float(np.linalg.norm(np.asarray(c.position, dtype=float)))
-                except Exception:
-                    r = float("nan")
-                if np.isfinite(r):
-                    radii.append(r)
-        mean_energy[k] = float(np.mean(energies)) if energies else 0.0
-        mean_degree[k] = float(np.mean(degrees)) if degrees else 0.0
-        mean_radius[k] = float(np.mean(radii)) if radii else 0.0
-
-        frame_dumper.on_step(world, step_ms[k])
-
-    # Persist results
-    arrays = {
-        "t": t,
-        "births": births,
-        "alive": alive,
-        "mean_energy": mean_energy,
-        "mean_degree": mean_degree,
-        "step_ms": step_ms,
-        "mean_radius": mean_radius,
-    }
-    paths = write_metrics_csv_npz(
-        cfg.out_dir,
-        arrays,
-        # Explicit header order including the new metric
-        header=(
-            "t",
-            "births",
-            "alive",
-            "mean_energy",
-            "mean_degree",
-            "step_ms",
-            "mean_radius",
-        ),
-    )
-
-    paths["events_csv_path"] = event_logger.write_csv("events.csv")
-    paths["frame_dumper_path"] = frame_dumper.write_files(cfg.out_dir)
-
-    return {**arrays, **paths}

@@ -20,5 +20,9 @@ class ChemotaxisBudConfig:
     # Initial energy given to every cell (if used by policies)
     energy_init: float = 1.0
     energy_max: float = 10.0
+    # Genome info
+    state_size: int = 4
+    # Experiment params
+    sample_every: int = 1
     # Output directory
     out_dir: str | os.PathLike = "runs/chemotaxis_bud"

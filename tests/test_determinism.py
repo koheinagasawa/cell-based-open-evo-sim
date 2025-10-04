@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from experiments.chemotaxis_bud.config import ChemotaxisBudConfig
-from experiments.chemotaxis_bud.runner import run_chemotaxis_bud_experiment
+from experiments.chemotaxis_bud.runner import make_spec
+from experiments.common.runner_generic import run_experiment
 from simulation.cell import Cell
 from simulation.fields import FieldChannel, FieldRouter
 from simulation.input_layout import InputLayout
@@ -286,11 +287,12 @@ def test_experiment_determinism(world_factory, test_output_dir):
         bidirectional=False,
         out_dir=str(test_output_dir / "det_run_a"),
     )
-    res_a = run_chemotaxis_bud_experiment(world_factory, cfg)
+    spec = make_spec(cfg, world_factory)
+    res_a = run_experiment(spec)
 
     # Run again with the same config to a different directory
     cfg.out_dir = str(test_output_dir / "det_run_b")
-    res_b = run_chemotaxis_bud_experiment(world_factory, cfg)
+    res_b = run_experiment(spec)
 
     # These arrays must be identical bitwise (exclude step_ms which is wall time)
     keys = ["t", "births", "alive", "mean_energy", "mean_degree", "mean_radius"]

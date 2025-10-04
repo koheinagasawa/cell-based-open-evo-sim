@@ -5,7 +5,8 @@ from pathlib import Path
 import numpy as np
 
 from experiments.chemotaxis_bud.config import ChemotaxisBudConfig
-from experiments.chemotaxis_bud.runner import run_chemotaxis_bud_experiment
+from experiments.chemotaxis_bud.runner import make_spec
+from experiments.common.runner_generic import run_experiment
 from experiments.sweeps.grid import run_grid
 
 
@@ -22,7 +23,8 @@ def test_run_chemotaxis_bud_experiment_smoke(world_factory, test_output_dir):
         bidirectional=True,
         out_dir=str(test_output_dir / "exp"),
     )
-    result = run_chemotaxis_bud_experiment(world_factory, cfg)
+    spec = make_spec(cfg, world_factory)
+    result = run_experiment(spec)
 
     # Files exist and have content
     assert (
@@ -83,7 +85,9 @@ def test_followers_mean_radius_trend(world_factory, test_output_dir):
         bidirectional=True,
         out_dir=str(test_output_dir / "trend_radius"),
     )
-    res = run_chemotaxis_bud_experiment(world_factory, cfg)
+    spec = make_spec(cfg, world_factory)
+    res = run_experiment(spec)
+
     r = res["mean_radius"]
     births = res["births"]
 
@@ -125,7 +129,8 @@ def test_grid_sweep_smoke(world_factory, test_output_dir):
     sweep_root = test_output_dir / "sweep"
 
     def runner(cfg):
-        return run_chemotaxis_bud_experiment(world_factory, cfg)
+        spec = make_spec(cfg, world_factory)
+        return run_experiment(spec)
 
     summary_keys = [
         "final_alive",
