@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
@@ -13,6 +12,7 @@ from experiments.chemotaxis_bud.genomes import (
     FollowerChemotaxisAndBud,
 )
 from experiments.common.event_logger import EventLogger
+from experiments.common.frame_dumper import FrameDumper
 from experiments.common.metrics import write_metrics_csv_npz
 from simulation.cell import Cell
 from simulation.fields import FieldChannel, FieldRouter
@@ -118,6 +118,8 @@ def run_chemotaxis_bud_experiment(
 
     event_logger = EventLogger(cfg.out_dir)
 
+    frame_dumper = FrameDumper()
+
     world = world_factory(
         cells,
         field_router=fr,
@@ -183,6 +185,8 @@ def run_chemotaxis_bud_experiment(
         mean_degree[k] = float(np.mean(degrees)) if degrees else 0.0
         mean_radius[k] = float(np.mean(radii)) if radii else 0.0
 
+        frame_dumper.on_step(world, step_ms[k])
+
     # Persist results
     arrays = {
         "t": t,
@@ -209,5 +213,6 @@ def run_chemotaxis_bud_experiment(
     )
 
     paths["events_csv_path"] = event_logger.write_csv("events.csv")
+    paths["frame_dumper_path"] = frame_dumper.write_files(cfg.out_dir)
 
     return {**arrays, **paths}
