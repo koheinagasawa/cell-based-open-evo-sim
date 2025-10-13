@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -11,10 +11,53 @@ from experiments.common.experiment_spec import ExperimentSpec
 from experiments.common.frame_dumper import FrameDumper
 from experiments.common.metrics import write_metrics_csv_npz
 from experiments.common.metrics_hook import MetricsHook
-
-# Soft imports to avoid hard coupling
 from simulation.cell import Cell
 from simulation.fields import FieldChannel, FieldRouter
+from simulation.policies import ConstantMaintenance
+from simulation.world import World
+
+
+def world_factory() -> Callable[..., World]:
+    """Return a factory function that builds a World with optional overrides.
+
+    Usage:
+        w = world_factory(
+            [cell],
+            seed=123,
+            energy_policy=DummyEnergyPolicy(0.0),
+            reproduction_policy=DummyBudPolicy(),
+        )
+    """
+
+    def _factory(
+        cells: Sequence,
+        *,
+        seed: int = 0,
+        actions: Optional[Dict[str, Callable]] = None,
+        message_router=None,
+        energy_policy: Any = None,
+        reproduction_policy: Any = None,
+        lifecycle_policy: Any = None,
+        use_neighbors: bool = True,
+        field_router=None,
+        use_fields: bool = False,
+        birth_callback: Optional[Callable[[World, Dict[str, Any]], None]] = None,
+    ) -> World:
+        return World(
+            cells,
+            seed=seed,
+            actions=actions or {},
+            message_router=message_router,
+            energy_policy=energy_policy or ConstantMaintenance(0.0),
+            reproduction_policy=reproduction_policy,
+            lifecycle_policy=lifecycle_policy,
+            use_neighbors=use_neighbors,
+            field_router=field_router,
+            use_fields=use_fields,
+            birth_callback=birth_callback,
+        )
+
+    return _factory
 
 
 def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
