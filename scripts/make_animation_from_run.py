@@ -29,7 +29,19 @@ def main(run_dir: str, out_gif: str):
     except Exception:
         edges_per_frame = None
 
-    ff, cf, ef = build_frames_from_recorder(
+    # Try to read field metadata
+    import json
+    import os
+
+    field_extent = None
+    try:
+        with open(os.path.join(run_dir, "field_metadata.json"), "r") as f:
+            meta = json.load(f)
+            field_extent = tuple(meta["bounds"])
+    except Exception:
+        pass
+
+    ff, cf, ef, vr = build_frames_from_recorder(
         field_frames=field_frames,
         ids_per_frame=ids_per_frame,
         pos_per_frame=pos_per_frame,
@@ -41,11 +53,13 @@ def main(run_dir: str, out_gif: str):
         field_frames=ff,
         cell_frames=cf,
         edge_frames=ef,
+        view_range=vr,
         fps=15,
         trail_len=30,
         figsize=(6, 6),
         cmap="viridis",
         show_colorbar=True,
+        field_extent=field_extent,
     )
     print("Saved:", out_path)
 

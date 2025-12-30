@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 
+from tests.utils.animation_loader import PlotRangeSpec
+
 # Type hints for clarity
 CellId = str
 Pos = Tuple[float, float]
@@ -842,6 +844,7 @@ def animate_field_cells_connections(
     field_frames: List[np.ndarray],  # each: (H, W) float array
     cell_frames: List[Dict[CellId, Pos]],  # each: {id: (x, y)}
     edge_frames: Optional[List[List[Edge]]] = None,  # each: [(id_a, id_b, weight)]
+    view_range: Optional[PlotRangeSpec] = None,
     *,
     fps: int = 15,
     trail_len: int = 30,
@@ -850,6 +853,7 @@ def animate_field_cells_connections(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     show_colorbar: bool = False,
+    field_extent: Optional[Tuple[float, float, float, float]] = None,
 ) -> str:
     """
     Create a single GIF that overlays:
@@ -872,16 +876,50 @@ def animate_field_cells_connections(
     # Compute field range if not provided
     if vmin is None or vmax is None:
         all_vals = np.concatenate([f.ravel() for f in field_frames])
-        if vmin is None:
-            vmin = float(np.nanpercentile(all_vals, 2))
-        if vmax is None:
-            vmax = float(np.nanpercentile(all_vals, 98))
+        # Filter out background (zeros) to avoid skewing percentiles
+        # We use a small epsilon because fields might decay to very small numbers
+        nonzero_vals = all_vals[all_vals > 1e-9]
+        
+        if len(nonzero_vals) > 0:
+            if vmin is None:
+                # Use 5th percentile of non-zeros for floor (or just 0)
+                vmin = 0.0 
+            if vmax is None:
+                # Use 99.5th percentile to focus on the peaks but allow some headroom.
+                # The trail should be visible if it's within 10-20% of the peak.
+                vmax = float(np.percentile(nonzero_vals, 99.5))
+        else:
+            if vmin is None: vmin = 0.0
+            if vmax is None: vmax = 1.0
+
         if math.isclose(vmin, vmax):
             vmax = vmin + 1e-6
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
+    if view_range is None:
+        if field_extent is not None:
+            # Use the field extent as the view range if provided
+            view_range = (
+                (field_extent[0], field_extent[1]),
+                (field_extent[2], field_extent[3]),
+            )
+        else:
+            from tests.utils.animation_loader import resolve_plot_range_from_frames
+
+            pos_per_frame = []
+            for frame in cell_frames:
+                if frame:
+                    pos_per_frame.append(np.array(list(frame.values())))
+                else:
+                    pos_per_frame.append(np.zeros((0, 2)))
+            view_range = resolve_plot_range_from_frames(pos_per_frame=pos_per_frame)
+
     fig, ax = plt.subplots(figsize=figsize)
+    (xmin, xmax), (ymin, ymax) = view_range
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+    ax.set_aspect("equal", adjustable="box")
     plt.tight_layout()
     im = ax.imshow(
         field_frames[0],
@@ -890,6 +928,7 @@ def animate_field_cells_connections(
         vmin=vmin,
         vmax=vmax,
         interpolation="nearest",
+        extent=field_extent,
     )
     if show_colorbar:
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
