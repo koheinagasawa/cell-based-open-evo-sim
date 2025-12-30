@@ -72,6 +72,13 @@ class SimpleBudding:
             # Inherit energy cap; newborn gets init_energy
             energy_init=float(self.init_energy),
             energy_max=float(getattr(parent, "energy_max", 1.0)),
+            # Inherit IO layout and neighbor settings
+            recv_layout=getattr(parent, "recv_layout", {}),
+            field_layout=getattr(parent, "field_layout", {}),
+            max_neighbors=getattr(parent, "max_neighbors", 0),
+            neighbor_aggregation=getattr(parent, "neighbor_aggregation", None),
+            include_neighbor_mask=getattr(parent, "include_neighbor_mask", True),
+            include_num_neighbors=getattr(parent, "include_num_neighbors", True),
         )
         # RNG will be attached by the world; newborn does not pay maintenance this frame.
         spawn_fn(baby, parent)
