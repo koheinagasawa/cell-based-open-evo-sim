@@ -942,7 +942,7 @@ def animate_field_cells_connections(
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     ax.set_aspect("equal", adjustable="box")
-    plt.tight_layout()
+    
     im = ax.imshow(
         field_frames[0],
         origin="lower",
@@ -954,6 +954,7 @@ def animate_field_cells_connections(
     )
     if show_colorbar:
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    plt.tight_layout()
 
     # Visual state
     trails: Dict[CellId, deque] = defaultdict(lambda: deque(maxlen=trail_len))
