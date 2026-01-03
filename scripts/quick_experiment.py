@@ -84,7 +84,7 @@ class SmartFollower:
         state_size: int,
         field_val_key: str,
         field_grad_key: str,
-        grad_gain: float = 1.0,
+        grad_gain: float = 0.2,
         bud_threshold: float = 0.5,
         cooldown_steps: int = 20,
     ):
@@ -171,9 +171,9 @@ follower_genome = lambda: SmartFollower(
     state_size=4,
     field_val_key="field:C:val",
     field_grad_key="field:C:grad",
-    grad_gain=5.0,
-    bud_threshold=0.1,
-    cooldown_steps=30,
+    grad_gain=0.5,
+    bud_threshold=10.0,
+    cooldown_steps=50,
 )
 
 # Reproduction policy
@@ -198,7 +198,7 @@ def make_unique_outdir(base="outputs/demo_quickrun"):
 
 result = run_experiment_quick(
     out_dir=make_unique_outdir(),  # output folder for all artifacts
-    steps=300,  # number of simulation steps
+    steps=200,  # number of simulation steps
     seed=42,  # random seed
     world_factory=world_factory(),  # callable returning a World
     interpreter=interpreter,  # interpreter instance or factory
@@ -212,7 +212,7 @@ result = run_experiment_quick(
             max_neighbors=0,
         ),
         dict(
-            count=20,
+            count=4,
             positioner=ring_positions(20, 4.0),
             genome_factory=follower_genome,
             field_layout={"field:C:val": 1, "field:C:grad": 2},
@@ -221,7 +221,7 @@ result = run_experiment_quick(
         ),
     ],
     policy=policy,  # budding + link policy
-    fields=[("C", 2.0, 0.02)], 
+    fields=[("C", 20.0, 0.9)], 
     sample_every=1,  # record every step
     make_gif=True,  # automatically create GIF
 )
