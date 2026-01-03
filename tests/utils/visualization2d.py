@@ -978,26 +978,39 @@ def animate_field_cells_connections(
             trails[cid].append(p)
 
         # draw trails (as thin lines)
+        # Optimization: Use LineCollection for trails instead of individual Line2D objects
+        # This is much faster when there are many cells
+        if trail_artists:
+             # Remove old collection if it exists (we'll just rebuild it for simplicity, 
+             # or we could update segments if we kept the collection object)
+             # Actually, rebuilding LineCollection is fast enough compared to updating N lines
+             for art in trail_artists.values():
+                 try:
+                     art.remove()
+                 except:
+                     pass
+             trail_artists.clear()
+
+        trail_segments = []
+        trail_colors = []
+        
         for cid, dq in trails.items():
             if len(dq) < 2:
                 continue
-            if cid not in trail_artists:
-                # init a line artist for this id
-                (line,) = ax.plot([], [], linewidth=1.0, alpha=0.5)
-                trail_artists[cid] = line
-            line = trail_artists[cid]
-            tx, ty = zip(*dq)
-            line.set_data(tx, ty)
-            # set consistent color by id
+            pts = list(dq)
+            trail_segments.append(pts)
+            # set consistent color by id (or by profile when available)
             if cell_profiles and cid in cell_profiles:
-                # Color by Profile
                 key_for_color = str(cell_profiles[cid])
             else:
-                # Color by ID
                 key_for_color = cid
-            
             color_idx = _id_to_color_index(key_for_color, n_color_bins)
-            line.set_color(cmap_obj(color_idx))
+            trail_colors.append(cmap_obj(color_idx))
+
+        if trail_segments:
+            lc = LineCollection(trail_segments, linewidths=1.0, colors=trail_colors, alpha=0.5)
+            ax.add_collection(lc)
+            trail_artists['all'] = lc
 
         # draw nodes (scatter)
         for cid, (x, y) in id2pos.items():
@@ -1037,7 +1050,8 @@ def animate_field_cells_connections(
         edge_artists = _edges_to_lines(ax, edge_frames[frame_idx], id2pos, max_w=3.0)
 
         ax.set_title(f"t = {frame_idx}")
-        return [im, scat, *trail_artists.values(), *edge_artists]
+        # Return all artists to be redrawn
+        return [im, scat] + list(trail_artists.values()) + edge_artists
 
     anim = FuncAnimation(fig, update, frames=T, interval=1000 / fps, blit=False)
     writer = PillowWriter(fps=fps)
