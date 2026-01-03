@@ -105,39 +105,26 @@ class FrameDumper:
             xs = np.linspace(xmin, xmax, W)
             ys = np.linspace(ymin, ymax, H)
             xx, yy = np.meshgrid(xs, ys)
-            pts = np.column_stack([xx.ravel(), yy.ravel()])
 
-            total = np.zeros(len(pts), dtype=float)
+            total = np.zeros((H, W), dtype=float)
 
             for ch in fr.channels.values():
                 if ch.dim_space != 2 or not ch.sources:
                     continue
 
-                sources_pos = np.array([s[0] for s in ch.sources])
-                sources_amt = np.array([s[1] for s in ch.sources])
+                # Use optimized sample_grid if available
+                if hasattr(ch, "sample_grid"):
+                    val, _ = ch.sample_grid(xx, yy)
+                    total += val
+                else:
+                    # Fallback: manual sampling (slow)
+                    # This path is just a safety net
+                    for i in range(H):
+                        for j in range(W):
+                            v, _ = ch.sample(np.array([xx[i, j], yy[i, j]]))
+                            total[i, j] += v
 
-                # (N_pixels, 1, 2) - (1, N_sources, 2)
-                # To avoid huge memory usage with many sources, process in chunks
-                chunk_size = 1000
-                n_sources = len(sources_pos)
-                
-                for i in range(0, n_sources, chunk_size):
-                    end = min(i + chunk_size, n_sources)
-                    s_pos_chunk = sources_pos[i:end]
-                    s_amt_chunk = sources_amt[i:end]
-                    
-                    d = pts[:, np.newaxis, :] - s_pos_chunk[np.newaxis, :, :]
-                    r2 = np.sum(d * d, axis=2)
-
-                    sig = float(ch.sigma)
-                    if sig <= 0:
-                        k = (r2 <= 1e-9).astype(float)
-                    else:
-                        k = np.exp(-0.5 * r2 / (sig * sig))
-
-                    total += k @ s_amt_chunk
-
-            return total.reshape(H, W)
+            return total
 
         f = None
         if hasattr(world, "field"):

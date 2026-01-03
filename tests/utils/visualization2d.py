@@ -9,6 +9,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.collections import LineCollection
 
 from tests.utils.animation_loader import PlotRangeSpec
 
@@ -798,15 +799,19 @@ def plot_field_scalar_and_quiver(
     X = np.linspace(xlo, xhi, grid_n)
     Y = np.linspace(ylo, yhi, grid_n)
     XX, YY = np.meshgrid(X, Y)
-    V = np.zeros_like(XX)
-    GX = np.zeros_like(XX)
-    GY = np.zeros_like(XX)
-    for i in range(grid_n):
-        for j in range(grid_n):
-            val, grad = ch.sample(np.array([XX[i, j], YY[i, j]], dtype=float))
-            V[i, j] = val
-            GX[i, j] = grad[0]
-            GY[i, j] = grad[1]
+    
+    if hasattr(ch, "sample_grid"):
+        V, (GX, GY) = ch.sample_grid(XX, YY)
+    else:
+        V = np.zeros_like(XX)
+        GX = np.zeros_like(XX)
+        GY = np.zeros_like(XX)
+        for i in range(grid_n):
+            for j in range(grid_n):
+                val, grad = ch.sample(np.array([XX[i, j], YY[i, j]], dtype=float))
+                V[i, j] = val
+                GX[i, j] = grad[0]
+                GY[i, j] = grad[1]
 
     im = ax.imshow(V, extent=[xlo, xhi, ylo, yhi], origin="lower", alpha=0.8)
     ax.quiver(XX, YY, GX, GY, angles="xy", scale_units="xy", scale=1.0, width=0.002)
@@ -821,22 +826,38 @@ def _id_to_color_index(cell_id: CellId, n_colors: int = 256) -> int:
 
 
 def _edges_to_lines(ax, edges, id2pos, max_w=3.0, edge_color=(1.0, 1.0, 1.0)):
-    """Draw edges with weight-based alpha/linewidth and fixed color."""
-    artists = []
+    """Draw edges with weight-based alpha/linewidth using LineCollection."""
+    segments = []
+    linewidths = []
+    colors = []
+
+    # edge_color is (r, g, b) or (r, g, b, a)
+    # We'll use the first 3 components and modulate alpha
+    base_rgb = edge_color[:3]
+
     for a, b, w in edges:
         pa = id2pos.get(a)
         pb = id2pos.get(b)
         if pa is None or pb is None:
             continue
+
+        segments.append([pa, pb])
+
         weight = 0.0 if w is None else float(w)
         weight01 = max(0.0, min(1.0, weight))
+
         lw = 0.5 + (max_w - 0.5) * weight01
         alpha = 0.15 + 0.65 * weight01
-        (ln,) = ax.plot(
-            [pa[0], pb[0]], [pa[1], pb[1]], linewidth=lw, alpha=alpha, color=edge_color
-        )
-        artists.append(ln)
-    return artists
+
+        linewidths.append(lw)
+        colors.append((*base_rgb, alpha))
+
+    if not segments:
+        return []
+
+    lc = LineCollection(segments, linewidths=linewidths, colors=colors)
+    ax.add_collection(lc)
+    return [lc]
 
 
 def animate_field_cells_connections(

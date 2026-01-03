@@ -96,6 +96,51 @@ class FieldChannel:
 
         return float(val), grad
 
+    def sample_grid(self, X: np.ndarray, Y: np.ndarray) -> Tuple[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        """
+        Vectorized sampling on a 2D grid (X, Y).
+        Returns (V, (GX, GY)) where V, GX, GY have same shape as X, Y.
+        """
+        V = np.zeros_like(X, dtype=float)
+        GX = np.zeros_like(X, dtype=float)
+        GY = np.zeros_like(X, dtype=float)
+
+        if not self.sources:
+            return V, (GX, GY)
+
+        sig2 = float(self.sigma * self.sigma) if self.sigma > 0 else 1.0
+        r2max = None if self.radius is None else float(self.radius * self.radius)
+
+        # Loop over sources and accumulate (vectorized over grid)
+        for p, a in self.sources:
+            # p is typically (2,) or (3,) but we only care about x,y for 2D grid
+            px, py = p[0], p[1]
+
+            dX = X - px
+            dY = Y - py
+            r2 = dX * dX + dY * dY
+
+            if r2max is not None:
+                # Optimization: only compute exp where r2 <= r2max
+                mask = r2 <= r2max
+                if not np.any(mask):
+                    continue
+                k = np.zeros_like(r2)
+                k[mask] = np.exp(-0.5 * r2[mask] / sig2)
+            else:
+                k = np.exp(-0.5 * r2 / sig2)
+
+            # Accumulate value
+            V += a * k
+
+            # Accumulate gradient: grad = a * (-(d / sig2)) * k
+            # factor = -a / sig2 * k
+            factor = (-a / sig2) * k
+            GX += factor * dX
+            GY += factor * dY
+
+        return V, (GX, GY)
+
 
 @dataclass
 class FieldRouter:
