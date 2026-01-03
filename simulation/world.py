@@ -10,8 +10,8 @@ try:
     # Optional import; World can run without fields.
     from simulation.fields import FieldChannel, FieldRouter
 except Exception:  # pragma: no cover
-    FieldRouter = Any  # type: ignore
-    FieldChannel = Any  # type: ignore
+    FieldRouter = type(None)  # type: ignore
+    FieldChannel = type(None)  # type: ignore
 
 
 class EnergyPolicy(Protocol):
