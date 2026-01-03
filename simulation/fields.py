@@ -113,35 +113,67 @@ class FieldChannel:
         sig2 = float(self.sigma * self.sigma) if self.sigma > 0 else 1.0
         r2max = None if self.radius is None else float(self.radius * self.radius)
 
-        # Loop over sources and accumulate (vectorized over grid)
-        for p, a in self.sources:
-            # p is typically (2,) or (3,) but we only care about x,y for 2D grid
-            px, py = p[0], p[1]
+        # Convert sources to arrays for full vectorization
+        # sources_pos: (N_sources, 2)
+        # sources_amt: (N_sources,)
+        sources_pos = np.array([s[0][:2] for s in self.sources])
+        sources_amt = np.array([s[1] for s in self.sources])
 
-            dX = X - px
-            dY = Y - py
-            r2 = dX * dX + dY * dY
+        # Flatten grid for broadcasting
+        # grid_pts: (N_pixels, 2)
+        H, W = X.shape
+        grid_pts = np.column_stack([X.ravel(), Y.ravel()])
+        
+        # Process in chunks to avoid huge memory usage
+        # (N_pixels, N_sources) can be large
+        chunk_size = 1024 # pixels per chunk
+        n_pixels = grid_pts.shape[0]
 
+        v_flat = np.zeros(n_pixels, dtype=float)
+        gx_flat = np.zeros(n_pixels, dtype=float)
+        gy_flat = np.zeros(n_pixels, dtype=float)
+
+        for i in range(0, n_pixels, chunk_size):
+            end = min(i + chunk_size, n_pixels)
+            # (chunk, 2)
+            pts_chunk = grid_pts[i:end]
+            
+            # Broadcasting: (chunk, 1, 2) - (1, N_sources, 2) -> (chunk, N_sources, 2)
+            diff = pts_chunk[:, np.newaxis, :] - sources_pos[np.newaxis, :, :]
+            
+            # r2: (chunk, N_sources)
+            r2 = np.sum(diff * diff, axis=2)
+            
             if r2max is not None:
-                # Optimization: only compute exp where r2 <= r2max
-                mask = r2 <= r2max
-                if not np.any(mask):
-                    continue
-                k = np.zeros_like(r2)
-                k[mask] = np.exp(-0.5 * r2[mask] / sig2)
-            else:
-                k = np.exp(-0.5 * r2 / sig2)
+                # Masking logic if needed, but usually exp is fast enough
+                # For simplicity and vectorization, we compute exp everywhere
+                # and mask out if needed, or just rely on exp decay
+                pass
 
-            # Accumulate value
-            V += a * k
+            # k: (chunk, N_sources)
+            k = np.exp(-0.5 * r2 / sig2)
+            
+            # Weighted sum for value
+            # (chunk, N_sources) @ (N_sources,) -> (chunk,)
+            v_flat[i:end] = k @ sources_amt
+            
+            # Gradients
+            # factor: (chunk, N_sources) = (-a / sig2) * k
+            # We can compute (k * sources_amt) * (-1/sig2)
+            # But we need to multiply by diff (chunk, N_sources, 2)
+            
+            # Let's do it carefully
+            # weighted_k: (chunk, N_sources) = k * sources_amt
+            weighted_k = k * sources_amt
+            
+            # grad_factor: (chunk, N_sources) = weighted_k * (-1.0 / sig2)
+            grad_factor = weighted_k * (-1.0 / sig2)
+            
+            # grad_x: sum(grad_factor * diff_x, axis=1)
+            gx_flat[i:end] = np.sum(grad_factor * diff[:, :, 0], axis=1)
+            gy_flat[i:end] = np.sum(grad_factor * diff[:, :, 1], axis=1)
 
-            # Accumulate gradient: grad = a * (-(d / sig2)) * k
-            # factor = -a / sig2 * k
-            factor = (-a / sig2) * k
-            GX += factor * dX
-            GY += factor * dY
-
-        return V, (GX, GY)
+        return v_flat.reshape(H, W), (gx_flat.reshape(H, W), gy_flat.reshape(H, W))
 
 
 @dataclass

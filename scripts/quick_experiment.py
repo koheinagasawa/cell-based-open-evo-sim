@@ -222,7 +222,7 @@ result = run_experiment_quick(
     ],
     policy=policy,  # budding + link policy
     fields=[("C", 20.0, 0.9)], 
-    sample_every=1,  # record every step
+    sample_every=5,  # record every 5th step to speed up visualization
     make_gif=True,  # automatically create GIF
 )
 
