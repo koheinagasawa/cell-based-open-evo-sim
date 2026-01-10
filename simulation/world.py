@@ -1,5 +1,7 @@
 import hashlib
 import struct
+import time
+from collections import defaultdict
 from typing import Any, Callable, Dict, Optional, Protocol
 
 import numpy as np
@@ -114,6 +116,9 @@ class World:
         # Use provided lifecycle policy or a no-op fallback to keep behavior unchanged.
         self.lifecycle_policy = lifecycle_policy or _NoDeath()
 
+        # --- Performance Metrics ---
+        self.perf_stats: Dict[str, float] = defaultdict(float)
+
     # --- RNG wiring ----------------------------------------------------------
     @staticmethod
     def _stable_spawn_key_from_cell(cell, quant: float = 1e6):
@@ -158,6 +163,9 @@ class World:
         if getattr(target_cell, "max_neighbors", 0) <= 0:
             return []
 
+        # metric: neighbor search count
+        self.perf_stats["neighbor_search_count"] += 1.0
+
         entries = []
         r2 = float(radius * radius)
 
@@ -182,7 +190,12 @@ class World:
         # 3) Commit: apply cell.next_state -> cell.state for ALL cells (synchronous state update)
         # 4) Reproduction, maintenance, deaths, time++ (project-specific policies)
         # 5) Connected messaging + Field routing (two-phase; affect NEXT frame)
+
+        # Reset per-step performance stats
+        self.perf_stats.clear()
+
         # -------- Phase 1: decide (no mutation to world state, only for cells allowed to act by lifecycle) --------
+        t_phase1_start = time.perf_counter()
         intents = []
         for cell in self.cells:
             if self.lifecycle_policy.can_act(cell):
@@ -190,7 +203,10 @@ class World:
                 if not self.use_neighbors or getattr(cell, "max_neighbors", 0) <= 0:
                     neighbors = []
                 else:
+                    # Measure neighbor search time
+                    t0 = time.perf_counter()
                     neighbors = self.get_neighbors(cell)
+                    self.perf_stats["time_neighbor_search"] += time.perf_counter() - t0
 
                 # Populate field inputs for this frame (read-only snapshot)
                 if self.use_fields and self.field_router is not None:
@@ -223,14 +239,24 @@ class World:
                 # Skip acting; treat as producing no outputs this frame.
                 intents.append((cell, {}))
 
+        self.perf_stats["time_phase1_decide"] = time.perf_counter() - t_phase1_start
+
         # --------  Phase 2: commit state update after all cells have acted  --------
+        t_phase2_start = time.perf_counter()
+
         for cell in self.cells:
             ns = getattr(cell, "next_state", None)
             if ns is not None:
                 cell.update_state(ns)
                 cell.next_state = None
 
+        self.perf_stats["time_phase2_commit_state"] = (
+            time.perf_counter() - t_phase2_start
+        )
+
         # --------  Phase 3: apply actions (order-stable, using a spawn buffer) --------
+        t_phase3_start = time.perf_counter()
+
         self._spawn_buffer = []
         for cell, slots in intents:
             for action_key in self.supported_actions:
@@ -241,6 +267,12 @@ class World:
                     self, f"apply_{action_key}", self.noop
                 )
                 handler(cell, value)
+
+        self.perf_stats["time_phase3_apply_actions"] = (
+            time.perf_counter() - t_phase3_start
+        )
+
+        t_phase4_start = time.perf_counter()
 
         #  --------  Phase 4.1: per-step maintenance on existing cells only --------
         for cell in self.cells:
@@ -265,7 +297,13 @@ class World:
                     self._birth_callback(self, info)
             self._spawn_buffer.clear()
 
+        self.perf_stats["time_phase4_maintenance"] = (
+            time.perf_counter() - t_phase4_start
+        )
+
         # --------  Phase 5: Connected messaging & Field routing (NEXT frame) --------
+        t_phase5_start = time.perf_counter()
+
         # Fields: decay old sources, then collect current-frame deposits
         if self.use_fields and self.field_router is not None:
             self.field_router.apply_decay()
@@ -276,6 +314,10 @@ class World:
             self.message_router.route_and_stage(self.cells)
             # Commit staged inboxes for next frame
             self.message_router.swap_inboxes(self.cells)
+
+        self.perf_stats["time_phase5_connected_messaging"] = (
+            time.perf_counter() - t_phase5_start
+        )
 
         self.time += 1
 
