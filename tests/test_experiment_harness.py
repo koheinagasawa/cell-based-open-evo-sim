@@ -30,7 +30,7 @@ def test_run_chemotaxis_bud_experiment_smoke(world_factory, test_output_dir):
     assert (
         "metrics_csv_path" in result
         and "metrics_npz_path" in result
-        and "events_csv_path" in result
+        and "events_birth_csv_path" in result
     )
     assert (test_output_dir / "exp" / "metrics.csv").exists()
     assert (test_output_dir / "exp" / "metrics.npz").exists()
@@ -59,7 +59,7 @@ def test_run_chemotaxis_bud_experiment_smoke(world_factory, test_output_dir):
     assert np.all(data["births"] >= 0)
 
     # Events CSV header sanity
-    with open(result["events_csv_path"], newline="") as f:
+    with open(result["events_birth_csv_path"], newline="") as f:
         r = csv.reader(f)
         header = next(r)
         assert header == [

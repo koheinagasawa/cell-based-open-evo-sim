@@ -42,6 +42,7 @@ def world_factory() -> Callable[..., World]:
         field_router=None,
         use_fields: bool = False,
         birth_callback: Optional[Callable[[World, Dict[str, Any]], None]] = None,
+        field_added_callback: Optional[Callable[[World, Dict[str, Any]], None]] = None,
     ) -> World:
         return World(
             cells,
@@ -55,6 +56,7 @@ def world_factory() -> Callable[..., World]:
             field_router=field_router,
             use_fields=use_fields,
             birth_callback=birth_callback,
+            field_added_callback=field_added_callback,
         )
 
     return _factory
@@ -64,25 +66,24 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
     """Run a generic experiment described by ExperimentSpec and record artifacts."""
     rng = np.random.default_rng(spec.seed)
 
-    # --- Interpreter ---
+    # Interpreter
     interp = spec.interpreter_factory()
 
-    # --- Fields ---
+    # Fields
     channels = {
         fc.name: FieldChannel(fc.name, fc.dim_space, fc.sigma, fc.decay)
         for fc in spec.field_channels
     }
     field_router = FieldRouter(channels) if channels else None
 
-    # --- instantiate hooks ---
+    # Instantiate hooks
     hooks: List[MetricsHook] = list(spec.metric_hooks) if spec.metric_hooks else []
-    for h in hooks:
-        try:
-            h.begin(world)
-        except Exception:
-            pass
 
-    # --- Build initial cells ---
+    # NOTE: hooks.begin(world) is called later after world creation.
+    # But currently runner structure creates world below.
+    # We will pass 'world' to hooks.begin() after creation.
+
+    # Build initial cells
     cells: List[Cell] = []
     for pop in spec.populations:
         for i in range(pop.count):
@@ -100,17 +101,37 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
                 )
             )
 
-    # --- Reproduction policy ---
+    # Reproduction policy
     reproduction_policy = spec.policy_factory() if spec.policy_factory else None
 
-    # --- Event logger / frame dumper ---
+    # Event logger / frame dumper
     os.makedirs(spec.out_dir, exist_ok=True)
     event_logger = EventLogger(spec.out_dir) if spec.log_events else None
     frame_dumper = (
         FrameDumper(sample_every=spec.sample_every) if spec.dump_frames else None
     )
 
-    # --- Build world (contract: accepts these kwargs if relevant) ---
+    # Callbacks for logging
+    birth_cb = None
+    field_cb = None
+    if event_logger:
+        birth_cb = lambda w, info: event_logger.log_birth(
+            w.time,
+            info.get("parent").id if info.get("parent") else None,
+            info["child"].id,
+            info["child"].position,
+            info.get("metadata", {}).get("link_weight"),
+        )
+        field_cb = lambda w, info: event_logger.log_field_add(
+            w.time,
+            info["cell"].id,
+            info["pos"],
+            info["field_name"],
+            info["sigma"],
+            info["decay"],
+        )
+
+    # Build world (contract: accepts these kwargs if relevant)
     world = spec.world_factory(
         cells,
         field_router=field_router,
@@ -118,22 +139,18 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
         use_neighbors=spec.use_neighbors,
         reproduction_policy=reproduction_policy,
         seed=spec.seed,
-        birth_callback=(
-            (
-                lambda w, info: event_logger.log_birth(
-                    w.time,
-                    info.get("parent").id if info.get("parent") else None,
-                    info["child"].id,
-                    info["child"].position,
-                    info.get("metadata", {}).get("link_weight"),
-                )
-            )
-            if event_logger
-            else None
-        ),
+        birth_callback=birth_cb,
+        field_added_callback=field_cb,
     )
 
-    # --- Metrics buffers ---
+    # Initialize hooks
+    for h in hooks:
+        try:
+            h.begin(world)
+        except Exception:
+            pass
+
+    # Metrics buffers
     T = int(spec.steps)
     t = np.arange(T, dtype=int)
     births = np.zeros(T, dtype=int)
@@ -142,7 +159,7 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
     mean_degree = np.zeros(T, dtype=float)
     step_ms = np.zeros(T, dtype=float)
 
-    # --- extra metrics (from hooks): name -> list[float] ---
+    # Extra metrics (from hooks): name -> list[float]
     extra: Dict[str, list] = {}
 
     prev_n = len(world.cells)
@@ -168,7 +185,7 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
         mean_energy[k] = float(np.mean(energies)) if energies else 0.0
         mean_degree[k] = float(np.mean(degrees)) if degrees else 0.0
 
-        # ---- hooks ----
+        # Hooks
         for h in hooks:
             try:
                 vals = h.on_step(world, k) or {}
@@ -180,14 +197,14 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
         if frame_dumper:
             frame_dumper.on_step(world, step_ms[k])  # uses internal integer counter
 
-    # finalize hooks (optional)
+    # Finalize hooks (optional)
     for h in hooks:
         try:
             h.end()
         except Exception:
             pass
 
-    # normalize extra metrics to arrays of length T (pad missing with nan)
+    # Normalize extra metrics to arrays of length T (pad missing with nan)
     extra_arrays = {}
     for name, seq in extra.items():
         arr = np.full(T, np.nan, dtype=float)
@@ -196,7 +213,7 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
             arr[:L] = np.asarray(seq[:L], dtype=float)
         extra_arrays[name] = arr
 
-    # --- Persist metrics + events + frames ---
+    # Persist metrics + events + frames
     arrays = dict(
         t=t,
         births=births,
@@ -213,7 +230,9 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
     )
 
     if event_logger:
-        paths["events_csv_path"] = event_logger.write_csv("events.csv")
+        # returns dict of paths
+        evt_paths = event_logger.write_csv("events.csv")
+        paths.update(evt_paths)
     if frame_dumper:
         paths["frame_dumper_path"] = frame_dumper.write_files(spec.out_dir)
 

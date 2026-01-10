@@ -8,9 +8,10 @@ import numpy as np
 
 try:
     # Optional import; World can run without fields.
-    from simulation.fields import FieldRouter
+    from simulation.fields import FieldChannel, FieldRouter
 except Exception:  # pragma: no cover
     FieldRouter = Any  # type: ignore
+    FieldChannel = Any  # type: ignore
 
 
 class EnergyPolicy(Protocol):
@@ -56,10 +57,11 @@ def _align_vec(vec, target_dim: int) -> np.ndarray:
 
 
 BirthCallback = Callable[["World", Dict[str, Any]], None]
+FieldAddedCallback = Callable[["World", Dict[str, Any]], None]
 
 
 class World:
-    supported_actions = ["move", "bud"]
+    supported_actions = ["move", "bud", "add_field"]
 
     def __init__(
         self,
@@ -75,6 +77,7 @@ class World:
         field_router: FieldRouter | None = None,
         use_fields: bool = False,
         birth_callback: Optional[BirthCallback] = None,
+        field_added_callback: Optional[FieldAddedCallback] = None,
     ):
         """
         :param seed: master seed for reproducible experiments. If None, use 0.
@@ -93,30 +96,29 @@ class World:
 
         # Order-stable spawn buffer; newborns are attached after maintenance
         self._spawn_buffer = []
-
-        # Optional: allow action handler injection; otherwise use methods on this class
-        self.actions = actions or {}
-
+        self.actions = (
+            actions or {}
+        )  # Optional: allow action handler injection; otherwise use methods on this class
         self.message_router = message_router
 
         # Feature gates
-        self.use_neighbors = bool(use_neighbors)
+        self.use_neighbors = bool(
+            use_neighbors
+        )  # If False, World will not perform neighbor search at all. Per-cell max_neighbors==0 also guarantees empty neighbors.
         self.field_router = field_router
         self.use_fields = bool(use_fields)
-
-        # If False, World will not perform neighbor search at all.
-        # Per-cell max_neighbors==0 also guarantees empty neighbors.
-        self.use_neighbors = bool(use_neighbors)
 
         # Policies (thin, swappable)
         self.energy_policy = energy_policy
         self.reproduction_policy = reproduction_policy
-        self._birth_callback: Optional[BirthCallback] = birth_callback
-
         # Use provided lifecycle policy or a no-op fallback to keep behavior unchanged.
         self.lifecycle_policy = lifecycle_policy or _NoDeath()
 
-        # --- Performance Metrics ---
+        # Callbacks
+        self._birth_callback: Optional[BirthCallback] = birth_callback
+        self._field_added_callback: Optional[FieldAddedCallback] = field_added_callback
+
+        # Performance Metrics
         self.perf_stats: Dict[str, float] = defaultdict(float)
 
     # --- RNG wiring ----------------------------------------------------------
@@ -339,6 +341,54 @@ class World:
             )
 
         self.reproduction_policy.apply(self, parent, value, _spawn)
+
+    def apply_add_field(self, cell, value):
+        """
+        Action handler: add a new field channel dynamically.
+        value format: [gate, id_seed, sigma, decay] (at least 2, typically 4 elements)
+        """
+        if not self.use_fields or self.field_router is None:
+            return
+
+        arr = np.asarray(value, dtype=float).ravel()
+        if arr.size < 2:
+            return
+
+        gate = arr[0]
+        # Activation threshold
+        if gate <= 0.5:
+            return
+
+        # Parse parameters
+        id_seed = float(arr[1])
+        # Defaults
+        sigma = 1.0
+        decay = 0.95
+
+        if arr.size >= 3:
+            sigma = max(0.1, float(arr[2]))
+        if arr.size >= 4:
+            decay = max(0.0, min(0.999, float(arr[3])))
+
+        # Determine field name deterministically from id_seed (discretized)
+        # e.g., seed in [-1, 1] mapped to ~100 distinct slots
+        slot = int(id_seed * 10.0)
+        name = f"dynamic_{slot}"
+
+        # Try to add
+        ch = FieldChannel(name=name, dim_space=2, sigma=sigma, decay=decay)
+        created = self.field_router.add_channel(ch)
+
+        if created and self._field_added_callback:
+            # Notify listener (e.g. logger)
+            info = {
+                "cell": cell,
+                "field_name": name,
+                "sigma": sigma,
+                "decay": decay,
+                "pos": tuple(cell.position),
+            }
+            self._field_added_callback(self, info)
 
     def noop(self, cell, value):
         # No-op action handler

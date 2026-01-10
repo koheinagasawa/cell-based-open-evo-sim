@@ -140,6 +140,7 @@ def world_factory() -> Callable[..., World]:
         field_router=None,
         use_fields: bool = False,
         birth_callback: Optional[Callable[[World, Dict[str, Any]], None]] = None,
+        field_added_callback: Optional[Callable[[World, Dict[str, Any]], None]] = None,
     ) -> World:
         return World(
             cells,
@@ -153,6 +154,7 @@ def world_factory() -> Callable[..., World]:
             field_router=field_router,
             use_fields=use_fields,
             birth_callback=birth_callback,
+            field_added_callback=field_added_callback,
         )
 
     return _factory

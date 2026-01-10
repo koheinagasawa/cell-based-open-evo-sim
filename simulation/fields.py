@@ -96,7 +96,9 @@ class FieldChannel:
 
         return float(val), grad
 
-    def sample_grid(self, X: np.ndarray, Y: np.ndarray) -> Tuple[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    def sample_grid(
+        self, X: np.ndarray, Y: np.ndarray
+    ) -> Tuple[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """
         Vectorized sampling on a 2D grid (X, Y).
         Returns (V, (GX, GY)) where V, GX, GY have same shape as X, Y.
@@ -248,3 +250,13 @@ class FieldRouter:
                 ch.deposit(
                     getattr(c, "position", np.zeros(ch.dim_space)), float(vec[0])
                 )
+
+    def add_channel(self, channel: FieldChannel) -> bool:
+        """
+        Dynamically register a new channel if it doesn't exist.
+        Returns True if created, False if already exists.
+        """
+        if channel.name in self.channels:
+            return False
+        self.channels[channel.name] = channel
+        return True
