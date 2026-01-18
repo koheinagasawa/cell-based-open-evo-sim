@@ -11,22 +11,54 @@ from experiments.common.experiment_spec import (
 )
 from experiments.common.runner_generic import run_experiment
 
+try:
+    from tests.utils.visualization2d import animate_field_cells_connections
+except ImportError:
+    animate_field_cells_connections = None
+
 
 def _render_gif_from_outdir(out_dir: str, gif_name: str = "field_conn_traj.gif") -> str:
     """Lazy import animator to avoid core depending on tests/."""
     import json
+
     import numpy as np
 
     from tests.utils.animation_loader import build_frames_from_recorder
     from tests.utils.visualization2d import animate_field_cells_connections
 
-    ff = np.load(os.path.join(out_dir, "field_frames.npy"), allow_pickle=True).tolist()
-    ids = np.load(os.path.join(out_dir, "cell_ids.npy"), allow_pickle=True).tolist()
-    pos = np.load(os.path.join(out_dir, "cell_pos.npy"), allow_pickle=True).tolist()
+    field_frames = np.load(
+        os.path.join(out_dir, "field_frames.npy"), allow_pickle=True
+    ).tolist()
+    cell_ids = np.load(
+        os.path.join(out_dir, "cell_ids.npy"), allow_pickle=True
+    ).tolist()
+    cell_pos = np.load(
+        os.path.join(out_dir, "cell_pos.npy"), allow_pickle=True
+    ).tolist()
     try:
         edges = np.load(os.path.join(out_dir, "edges.npy"), allow_pickle=True).tolist()
     except Exception:
         edges = None
+    cell_profiles_map: Dict[str, str] = {}
+    prof_path = os.path.join(out_dir, "cell_profiles.npy")
+
+    if os.path.exists(prof_path):
+        # profiles_per_frame: shape (T,), each element is List[Any] matching cell_ids[t]
+        profiles_frames = np.load(prof_path, allow_pickle=True)
+
+        # Aggregate profiles from all frames into a single lookup dict
+        # (Assuming a cell's profile does not change over time)
+        for t in range(len(cell_ids)):
+            ids_t = cell_ids[t]
+            profs_t = profiles_frames[t]
+
+            if ids_t is None or profs_t is None:
+                continue
+
+            # zip handles equal length; check length safely if needed
+            for cid, prof in zip(ids_t, profs_t):
+                if prof is not None and cid not in cell_profiles_map:
+                    cell_profiles_map[cid] = str(prof)
 
     # Try to read field metadata
     field_extent = None
@@ -38,10 +70,17 @@ def _render_gif_from_outdir(out_dir: str, gif_name: str = "field_conn_traj.gif")
         pass
 
     F, C, E, view_range = build_frames_from_recorder(
-        field_frames=ff, ids_per_frame=ids, pos_per_frame=pos, edges_per_frame=edges
+        field_frames=field_frames,
+        ids_per_frame=cell_ids,
+        pos_per_frame=cell_pos,
+        edges_per_frame=edges,
     )
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, gif_name)
+
+    # Choose colormap: 'tab10' for categorical profiles, 'viridis' for IDs
+    cmap_to_use = "tab10" if cell_profiles_map else "viridis"
+
     animate_field_cells_connections(
         out_path=out_path,
         field_frames=F,
@@ -51,7 +90,7 @@ def _render_gif_from_outdir(out_dir: str, gif_name: str = "field_conn_traj.gif")
         fps=15,
         trail_len=40,
         figsize=(6, 6),
-        cmap="viridis",
+        cmap=cmap_to_use,
         show_colorbar=True,
         field_extent=field_extent,
     )
@@ -116,16 +155,18 @@ def build_spec_quick(
         else:
             raise TypeError("Each population must be a tuple or dict.")
 
-        pops.append(PopulationSpec(
-            count=int(count),
-            positioner=positioner,
-            genome_factory=genome_factory,
-            recv_layout=recv_layout,
-            field_layout=field_layout,
-            energy_init=energy_init,
-            energy_max=energy_max,
-            max_neighbors=max_neighbors,
-        ))
+        pops.append(
+            PopulationSpec(
+                count=int(count),
+                positioner=positioner,
+                genome_factory=genome_factory,
+                recv_layout=recv_layout,
+                field_layout=field_layout,
+                energy_init=energy_init,
+                energy_max=energy_max,
+                max_neighbors=max_neighbors,
+            )
+        )
 
     interpreter_factory = _as_factory(interpreter)
     policy_factory = _as_factory(policy) if policy is not None else None
@@ -150,6 +191,7 @@ def build_spec_quick(
 
 class PopulationQuickDict(TypedDict, total=False):
     """Dictionary-style population definition for quick experiments."""
+
     count: int
     positioner: PosFunc
     genome_factory: GenomeFactory
@@ -159,10 +201,12 @@ class PopulationQuickDict(TypedDict, total=False):
     energy_init: float
     energy_max: float
 
+
 PopulationQuick = Union[
     Tuple[int, PosFunc, GenomeFactory],  # legacy tuple style
-    PopulationQuickDict,                # extended dict style
+    PopulationQuickDict,  # extended dict style
 ]
+
 
 def run_experiment_quick(
     *,

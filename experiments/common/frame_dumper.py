@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -14,6 +14,7 @@ class FrameDumper:
       - field_frames.npy : object array length T, each (H,W) float
       - cell_ids.npy     : object array length T, each List[str]
       - cell_pos.npy     : object array length T, each (N_t,2) float
+      - cell_profiles.npy : object array length T, each List[Any] (profile)
       - edges.npy        : object array length T, each List[(idA,idB,weight)]
     """
 
@@ -30,6 +31,7 @@ class FrameDumper:
         self._field_frames: List[np.ndarray] = []
         self._ids_per_frame: List[List[CellId]] = []
         self._pos_per_frame: List[np.ndarray] = []
+        self._profiles_per_frame: List[List[Any]] = []
         self._edges_per_frame: List[List[Edge]] = []
         self._n = 0
 
@@ -47,10 +49,12 @@ class FrameDumper:
 
         ids = list(id2pos.keys())
         pos = np.asarray([id2pos[i] for i in ids], dtype=float)
+        profiles = self._extract_profiles(world, ids)
 
         self._field_frames.append(field)
         self._ids_per_frame.append(ids)
         self._pos_per_frame.append(pos)
+        self._profiles_per_frame.append(profiles)
         self._edges_per_frame.append(edges)
 
         self._n += 1
@@ -86,6 +90,13 @@ class FrameDumper:
         paths["cell_pos"] = os.path.join(out_dir, "cell_pos.npy")
         np.save(
             paths["cell_pos"], _to_obj_array(self._pos_per_frame), allow_pickle=True
+        )
+
+        paths["cell_profiles"] = os.path.join(out_dir, "cell_profiles.npy")
+        np.save(
+            paths["cell_profiles"],
+            _to_obj_array(self._profiles_per_frame),
+            allow_pickle=True,
         )
 
         paths["edges"] = os.path.join(out_dir, "edges.npy")
@@ -163,6 +174,22 @@ class FrameDumper:
             y = float(p[1] if p.size > 1 else 0.0)
             id2pos[cid] = (x, y)
         return id2pos
+
+    def _extract_profiles(self, world, sorted_ids: List[CellId]) -> List[Any]:
+        """Build list of profiles matching the sorted_ids order."""
+        cells = (
+            getattr(world, "cells", None) or getattr(world, "get_cells", lambda: None)()
+        )
+        if cells is None:
+            return [None] * len(sorted_ids)
+
+        id2prof = {}
+        for c in cells:
+            cid = str(getattr(c, "id", ""))
+            prof = getattr(c, "profile", None)
+            id2prof[cid] = prof
+
+        return [id2prof.get(cid, None) for cid in sorted_ids]
 
     def _extract_edges(self, world, id2pos: Dict[CellId, Pos]) -> List[Edge]:
         """
