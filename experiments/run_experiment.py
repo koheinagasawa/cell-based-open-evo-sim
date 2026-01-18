@@ -91,6 +91,7 @@ def _render_gif_from_outdir(out_dir: str, gif_name: str = "field_conn_traj.gif")
         trail_len=40,
         figsize=(6, 6),
         cmap=cmap_to_use,
+        cell_profiles=cell_profiles_map if cell_profiles_map else None,
         show_colorbar=True,
         field_extent=field_extent,
     )
