@@ -11,6 +11,7 @@ class Cell:
         id=None,
         state_size=4,
         interpreter=None,
+        profile=None,
         time_encoding_fn=None,
         max_neighbors=4,
         neighbor_aggregation: str | None = None,  # {None,'mean','max'}
@@ -33,6 +34,7 @@ class Cell:
         self.interpreter = (
             interpreter  # Interpreter used to map the genome's output to local slots
         )
+        self.profile = profile
         self.state = np.zeros(
             state_size, dtype=float
         )  # Abstract internal states of the cell
@@ -260,7 +262,7 @@ class Cell:
     def act(self, inputs):
         """
         Generate outputs using the genome network and provided inputs.
-        The outputs are interpreted by the interpreter and used to update Cell's internal states.
+        The outputs are interpreted by the interpreter (context-aware via profile) and used to update Cell's internal states.
         Pass cell-local RNG if supported.
         """
         try:
@@ -273,7 +275,8 @@ class Cell:
             self.raw_output = self.genome.activate(inputs)
 
         if self.interpreter:
-            slots = self.interpreter.interpret(self.raw_output)
+            # Pass self.profile as context
+            slots = self.interpreter.interpret(self.raw_output, profile=self.profile)
             self.output_slots = slots
             if "state" in slots:
                 # Two-phase contract: never write to self.state here.
