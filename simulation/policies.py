@@ -20,93 +20,28 @@ class ConstantMaintenance:
 
 
 @dataclass(frozen=True)
-class SimpleBudding:
-    """Minimal budding policy with a scalar threshold and cost."""
-
-    threshold: float = 0.6  # min energy required to attempt budding
-    cost: float = 0.5  # energy paid by parent at bud time
-    init_energy: float = 0.4  # newborn initial energy
-    offset_sigma: float = 0.2  # jitter if no offset is provided
-    init_child: Optional[Callable[["Cell", "Cell", "World"], None]] = None
-
-    def apply(self, world, parent, value, spawn_fn):
-        """Interpret 'value' and spawn a single offspring if conditions hold.
-
-        Accepted shapes:
-          - scalar: gate in (0..1); offset sampled ~ N(0, sigma)
-          - D-vector: treated as offset; gate=1.0
-          - [gate, *offset(D)]: explicit gate and offset
-        """
-        arr = np.atleast_1d(np.asarray(value, dtype=float))
-        D = int(parent.position.shape[0])
-
-        # Parse gate and offset
-        if arr.size == 1:
-            gate = float(arr[0])
-            rng = getattr(parent, "rng", None)
-            sigma = float(self.offset_sigma)
-            offset = (
-                rng.normal(0.0, sigma, size=D)
-                if rng is not None
-                else np.zeros(D, dtype=float)
-            )
-        elif arr.size == D:
-            gate, offset = 1.0, arr[:D]
-        else:
-            gate = float(arr[0])
-            offset = arr[1 : 1 + D]
-
-        # Check energy/threshold
-        if gate <= 0.5:
-            return
-        if float(parent.energy) < float(self.threshold):
-            return
-
-        # Pay cost and spawn
-        parent.energy = max(0.0, float(parent.energy) - float(self.cost))
-
-        Baby = parent.__class__
-        baby = Baby(
-            position=(parent.position + offset).tolist(),
-            genome=parent.genome,
-            state_size=parent.state_size,
-            interpreter=parent.interpreter,
-            # Inherit energy cap; newborn gets init_energy
-            energy_init=float(self.init_energy),
-            energy_max=float(getattr(parent, "energy_max", 1.0)),
-            # Inherit IO layout and neighbor settings
-            recv_layout=getattr(parent, "recv_layout", {}),
-            field_layout=getattr(parent, "field_layout", {}),
-            max_neighbors=getattr(parent, "max_neighbors", 0),
-            neighbor_aggregation=getattr(parent, "neighbor_aggregation", None),
-            include_neighbor_mask=getattr(parent, "include_neighbor_mask", True),
-            include_num_neighbors=getattr(parent, "include_num_neighbors", True),
-        )
-        # RNG will be attached by the world; newborn does not pay maintenance this frame.
-        spawn_fn(baby, parent)
-
-        # Call optional birth hook (after child exists, before step ends)
-        if self.init_child is not None:
-            self.init_child(baby, parent, world)
-
-
-@dataclass(frozen=True)
-class AgentBudding:
+class BaseBudding:
     """
-    Budding policy that ensures the child cell belongs to the same Agent as the parent.
-    It attempts to retrieve the parent's Agent instance from the World to spawn the child.
+    Base class for budding policies.
+    Handles the common physics and economics of budding:
+    - Gate threshold check
+    - Energy check & cost deduction
+    - Offset calculation
+    - Basic kwargs preparation
     """
 
     threshold: float = 0.6
     cost: float = 0.5
     init_energy: float = 0.4
     offset_sigma: float = 0.2
+    init_child: Optional[Callable[["Cell", "Cell", "World"], None]] = None
 
     def apply(self, world, parent, value, spawn_fn):
         arr = np.atleast_1d(np.asarray(value, dtype=float))
         D = int(parent.position.shape[0])
 
-        # Parse gate and offset (Standard logic)
+        # --- 1. Parse Input Vector ---
+        # Format: [gate, offset_0, ..., offset_D, ...extra_data...]
         if arr.size == 1:
             gate = float(arr[0])
             rng = getattr(parent, "rng", None)
@@ -116,25 +51,29 @@ class AgentBudding:
                 if rng is not None
                 else np.zeros(D, dtype=float)
             )
-        elif arr.size == D:
-            gate, offset = 1.0, arr[:D]
-        else:
+            extra_data = np.array([])
+        elif arr.size >= 1 + D:
             gate = float(arr[0])
             offset = arr[1 : 1 + D]
+            extra_data = arr[1 + D :]
+        else:
+            # Not enough data
+            return
 
-        # Check conditions
+        # --- 2. Check Conditions ---
         if gate <= 0.5:
             return
         if float(parent.energy) < float(self.threshold):
             return
 
+        # --- 3. Execute Budding (Physics & Economics) ---
         # Pay cost
         parent.energy = max(0.0, float(parent.energy) - float(self.cost))
 
-        # --- Create Child via Agent Lookup ---
+        # Calculate new position
         new_pos = (parent.position + offset).tolist()
 
-        # Prepare basic attributes for the new cell
+        # Prepare common kwargs for Cell creation
         cell_kwargs = dict(
             state_size=parent.state_size,
             energy_init=float(self.init_energy),
@@ -145,115 +84,101 @@ class AgentBudding:
             neighbor_aggregation=getattr(parent, "neighbor_aggregation", None),
             include_neighbor_mask=getattr(parent, "include_neighbor_mask", True),
             include_num_neighbors=getattr(parent, "include_num_neighbors", True),
-            profile=parent.profile,  # Simply copy profile
+            profile=parent.profile,  # Default: inherit
         )
 
-        # 1. Try to find the Agent instance in the World
-        agent_id = parent.agent_id
-        agent = world.get_agent(agent_id)
+        # --- 4. Delegate Specific Creation Logic ---
+        child = self._create_child(world, parent, new_pos, cell_kwargs, extra_data)
 
-        # This ensures the child is added to agent.cells and shares genome/interpreter
-        child = agent.spawn_cell(position=new_pos, **cell_kwargs)
+        if child:
+            spawn_fn(child, parent)
 
-        # Register to World buffer
-        spawn_fn(child, parent)
+        # Call optional birth hook (after child exists, before step ends)
+        if self.init_child is not None:
+            self.init_child(child, parent, world)
+
+    def _create_child(
+        self, world, parent, position, cell_kwargs, extra_data
+    ) -> Optional[Cell]:
+        """
+        Abstract method to create the specific type of child cell.
+        Must be implemented by subclasses.
+        """
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
-class AgentProfileBudding(AgentBudding):
+class SimpleBudding(BaseBudding):
     """
-    Extends AgentBudding to handle Profile assignment.
-    It uses the genome output vector to determine the child's profile.
-
-    Expected genome output format:
-    [gate, offset_x, offset_y, ..., profile_control_index]
+    Standard budding: Simply creates a new Cell copying parent's genome/interpreter.
+    Does not handle Agent lookup.
     """
 
-    inherit_profile: bool = True
-    profile_map: Optional[Dict[int, str]] = None  # Maps int(output) -> profile_name
-
-    def apply(self, world, parent, value, spawn_fn):
-        arr = np.atleast_1d(np.asarray(value, dtype=float))
-        D = int(parent.position.shape[0])
-
-        # --- 1. Gate & Offset (Standard Logic) ---
-        if arr.size == 1:
-            gate = float(arr[0])
-            rng = getattr(parent, "rng", None)
-            sigma = float(self.offset_sigma)
-            offset = (
-                rng.normal(0.0, sigma, size=D)
-                if rng is not None
-                else np.zeros(D, dtype=float)
-            )
-        elif arr.size >= 1 + D:  # Check if enough size for gate + offset
-            gate = float(arr[0])
-            offset = arr[1 : 1 + D]
-        else:
-            # Fallback for unexpected size
-            return
-
-        # Check conditions
-        if gate <= 0.5:
-            return
-        if float(parent.energy) < float(self.threshold):
-            return
-
-        # Pay cost
-        parent.energy = max(0.0, float(parent.energy) - float(self.cost))
-
-        # --- 2. Determine Child Profile ---
-        new_profile = parent.profile  # Default: Inherit
-
-        if not self.inherit_profile and self.profile_map:
-            # Look for profile control index after offset
-            # Vector structure: [gate(1), offset(D), profile_idx(1)]
-            idx_pos = 1 + D
-            if arr.size > idx_pos:
-                # Round to nearest integer to get map key
-                p_idx = int(round(arr[idx_pos]))
-                # Look up, fallback to parent profile if key not found
-                new_profile = self.profile_map.get(p_idx, parent.profile)
-
-        # --- 3. Create Child via Agent Lookup (Reusing AgentBudding logic manually) ---
-        # Note: We duplicate this part slightly to inject 'new_profile'
-        # because the base class apply() doesn't expose a hook for profile modification easily.
-
-        new_pos = (parent.position + offset).tolist()
-
-        cell_kwargs = dict(
-            state_size=parent.state_size,
-            energy_init=float(self.init_energy),
-            energy_max=float(getattr(parent, "energy_max", 1.0)),
-            recv_layout=getattr(parent, "recv_layout", {}),
-            field_layout=getattr(parent, "field_layout", {}),
-            max_neighbors=getattr(parent, "max_neighbors", 0),
-            neighbor_aggregation=getattr(parent, "neighbor_aggregation", None),
-            include_neighbor_mask=getattr(parent, "include_neighbor_mask", True),
-            include_num_neighbors=getattr(parent, "include_num_neighbors", True),
-            profile=new_profile,  # <--- Use determined profile
+    def _create_child(self, world, parent, position, cell_kwargs, extra_data):
+        return Cell(
+            position=position,
+            genome=parent.genome,
+            interpreter=parent.interpreter,
+            **cell_kwargs,
         )
 
-        # Agent Lookup
+
+@dataclass(frozen=True)
+class AgentBudding(BaseBudding):
+    """
+    Agent-aware budding: Ensures the child belongs to the same Agent.
+    """
+
+    def _create_child(self, world, parent, position, cell_kwargs, extra_data):
+        # 1. Try to find the Agent instance in the World
         agent_id = getattr(parent, "agent_id", None)
         agent = None
         if hasattr(world, "get_agent") and agent_id:
             agent = world.get_agent(agent_id)
 
         if agent:
-            child = agent.spawn_cell(position=new_pos, **cell_kwargs)
+            # Case A: Agent exists -> Delegate to Agent
+            return agent.spawn_cell(position=position, **cell_kwargs)
         else:
+            # Case B: Fallback -> Create manually and attach ID
             child = Cell(
-                position=new_pos,
+                position=position,
                 genome=parent.genome,
                 interpreter=parent.interpreter,
                 **cell_kwargs,
             )
             if agent_id:
                 child.agent_id = agent_id
+            return child
 
-        # Register
-        spawn_fn(child, parent)
+
+@dataclass(frozen=True)
+class AgentProfileBudding(AgentBudding):
+    """
+    Agent + Profile budding:
+    Determines the child's profile from extra genome output,
+    then delegates to AgentBudding for creation.
+    """
+
+    inherit_profile: bool = True
+    profile_map: Optional[Dict[int, str]] = None
+
+    def _create_child(self, world, parent, position, cell_kwargs, extra_data):
+        # Determine Profile
+        new_profile = cell_kwargs.get("profile", "default")
+
+        if not self.inherit_profile and self.profile_map:
+            # extra_data corresponds to the part of genome output after offset
+            if extra_data.size > 0:
+                # The first element of extra_data is the profile control
+                p_idx = int(round(extra_data[0]))
+                new_profile = self.profile_map.get(p_idx, new_profile)
+
+        # Update kwargs with the new profile
+        cell_kwargs["profile"] = new_profile
+
+        # Delegate to AgentBudding to handle the actual instantiation & Agent lookup
+        return super()._create_child(world, parent, position, cell_kwargs, extra_data)
 
 
 class ParentChildLinkWrapper:
