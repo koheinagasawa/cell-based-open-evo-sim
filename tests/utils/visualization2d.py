@@ -875,6 +875,7 @@ def animate_field_cells_connections(
     vmax: Optional[float] = None,
     show_colorbar: bool = False,
     field_extent: Optional[Tuple[float, float, float, float]] = None,
+    cell_profiles: Optional[Dict[CellId, str]] = None,
 ) -> str:
     """
     Create a single GIF that overlays:
@@ -988,14 +989,26 @@ def animate_field_cells_connections(
             tx, ty = zip(*dq)
             line.set_data(tx, ty)
             # set consistent color by id
-            color_idx = _id_to_color_index(cid, n_color_bins)
+            if cell_profiles and cid in cell_profiles:
+                # Color by Profile
+                key_for_color = str(cell_profiles[cid])
+            else:
+                # Color by ID
+                key_for_color = cid
+            
+            color_idx = _id_to_color_index(key_for_color, n_color_bins)
             line.set_color(cmap_obj(color_idx))
 
         # draw nodes (scatter)
         for cid, (x, y) in id2pos.items():
             xs.append(x)
             ys.append(y)
-            color_idx = _id_to_color_index(cid, n_color_bins)
+            if cell_profiles and cid in cell_profiles:
+                key_for_color = str(cell_profiles[cid])
+            else:
+                key_for_color = cid
+            
+            color_idx = _id_to_color_index(key_for_color, n_color_bins)
             cs.append(color_idx)
         if scat is None:
             scat = ax.scatter(

@@ -5,7 +5,7 @@ from simulation.agent import Agent
 from simulation.cell import Cell
 from simulation.interpreter import ProfiledInterpreter, SlotBasedInterpreter
 from simulation.policies import AgentProfileBudding
-
+from tests.utils.visualization2d import animate_field_cells_connections
 
 class ConstantGenome:
     def __init__(self, output_vector):
@@ -157,3 +157,53 @@ def test_profile_fallback(agent_setup):
 
     child = w.cells[1]
     assert child.profile == "stem"  # Fallback to parent
+
+def test_visualize_profile_colors(test_output_dir, interpreter4):
+    """
+    Test that the visualization function accepts a 'cell_profiles' map
+    and generates a GIF without error.
+    """
+    # 1. Create two cells with different profiles
+    # Profile names chosen to likely hash to different colors
+    c1 = Cell([0, 0], genome=None, interpreter=interpreter4, profile="mover", id="c1")
+    c2 = Cell([1, 1], genome=None, interpreter=interpreter4, profile="emitter", id="c2")
+    
+    # 2. Prepare dummy frames (static positions)
+    T = 5
+    field_frames = [np.zeros((10, 10)) for _ in range(T)]
+    
+    # Simple movement
+    cell_frames = []
+    for t in range(T):
+        frame = {
+            c1.id: (0.0 + t*0.1, 0.0),
+            c2.id: (1.0, 1.0 - t*0.1)
+        }
+        cell_frames.append(frame)
+
+    edge_frames = [[] for _ in range(T)]
+
+    # 3. Create Profile Map
+    # In a real experiment, this would be built from the world or a specific dumper
+    cell_profiles = {
+        c1.id: c1.profile,
+        c2.id: c2.profile
+    }
+
+    # 4. Generate Animation
+    out_gif = test_output_dir / "profile_colors.gif"
+    
+    animate_field_cells_connections(
+        out_path=str(out_gif),
+        field_frames=field_frames,
+        cell_frames=cell_frames,
+        edge_frames=edge_frames,
+        cell_profiles=cell_profiles, # <--- Pass the profile map
+        fps=5,
+        figsize=(4, 4),
+        cmap="tab10"
+    )
+
+    # 5. Verify output exists
+    assert out_gif.exists()
+    assert out_gif.stat().st_size > 0
