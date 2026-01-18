@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 
 import numpy as np
 
@@ -9,6 +10,7 @@ class Cell:
         position,
         genome,
         id=None,
+        agent_id: Optional[str] = None,
         state_size=4,
         interpreter=None,
         profile=None,
@@ -29,6 +31,7 @@ class Cell:
         **kwargs,
     ):
         self.id = id or str(uuid.uuid4())
+        self.agent_id = agent_id
         self.position = np.array(position, dtype=float)
         self.genome = genome  # Neural network shared by multiple cells
         self.interpreter = (

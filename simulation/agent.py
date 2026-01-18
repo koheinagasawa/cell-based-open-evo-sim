@@ -38,13 +38,10 @@ class Agent:
         cell = Cell(
             position=position,
             genome=self.genome,
+            agent_id=self.id,
             interpreter=self.interpreter,
             **kwargs,
         )
-
-        # Tag the cell with this agent's ID for backward reference
-        # (This attribute is dynamic and not strictly defined in Cell yet, but useful)
-        cell.agent_id = self.id
 
         self.cells.append(cell)
         return cell

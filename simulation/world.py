@@ -66,6 +66,7 @@ class World:
     def __init__(
         self,
         cells,
+        agents=None,
         *,
         seed: int | None = None,
         actions: Dict[str, Callable] | None = None,
@@ -86,6 +87,7 @@ class World:
         Do not import concrete policy classes here; keep this layer thin.
         """
         self.cells = cells
+        self.agents: Dict[str, Any] = {a.id: a for a in (agents or [])}
         self.time = 0
         self.seed = int(seed) if seed is not None else 0
 
@@ -184,6 +186,14 @@ class World:
         # Deterministic order, independent of self.cells iteration order
         entries.sort(key=lambda t: (t[0], t[1], t[2]))
         return [t[3] for t in entries]
+
+    def get_agent(self, agent_id: str):
+        return self.agents.get(agent_id)
+
+    def resolve_agent_for_cell(self, cell) -> Optional[Any]:
+        if cell.agent_id:
+            return self.get_agent(cell.agent_id)
+        return None
 
     def step(self):
         # --- Two-phase update schedule (design contract) ---------------------

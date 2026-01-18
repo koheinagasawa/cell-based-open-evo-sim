@@ -129,6 +129,7 @@ def world_factory() -> Callable[..., World]:
 
     def _factory(
         cells: Sequence,
+        agents: Optional[Sequence[Any]] = None,
         *,
         seed: int = 0,
         actions: Optional[Dict[str, Callable]] = None,
@@ -144,6 +145,7 @@ def world_factory() -> Callable[..., World]:
     ) -> World:
         return World(
             cells,
+            agents=agents,
             seed=seed,
             actions=actions or {},
             message_router=message_router,
