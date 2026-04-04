@@ -158,12 +158,6 @@ class Cell:
         # Track mask as float (1.0 present, 0.0 absent)
         mask = [0.0] * K
 
-        # Clip neighbors to K and build blocks
-        sorted_neighbors = neighbors[:K]
-
-        # Track mask as float (1.0 present, 0.0 absent)
-        mask = [0.0] * K
-
         # Fill existing neighbors
         rels = []  # collect relative positions for aggregation
         nstates = []  # collect neighbor states for aggregation
