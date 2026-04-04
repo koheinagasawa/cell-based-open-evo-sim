@@ -84,6 +84,19 @@ class Cell:
         """Dimensionality of the position vector."""
         return int(self.position.shape[0])
 
+    def _append_layout_tail(self, input_vec: list, layout: dict, source: dict) -> None:
+        """Append fixed-length vectors for each key in *layout* (sorted) from *source*."""
+        for key in sorted(layout.keys()):
+            dim = int(layout[key])
+            v = np.asarray(
+                source.get(key, np.zeros(dim, dtype=float)), dtype=float
+            ).ravel()
+            out = np.zeros(dim, dtype=float)
+            n = min(dim, v.size)
+            if n > 0:
+                out[:n] = v[:n]
+            input_vec += out.tolist()
+
     def sense(self, neighbors):
         """
         Build a fixed-length input vector in the following order (2D example):
@@ -123,32 +136,10 @@ class Cell:
             if self.include_num_neighbors:
                 input_vec.append(0.0)
 
-            # Connected messaging tail (deterministic, fixed)
             if self.recv_layout:
-                for key in sorted(self.recv_layout.keys()):
-                    dim = int(self.recv_layout[key])
-                    v = np.asarray(
-                        self.inbox.get(key, np.zeros(dim, dtype=float)), dtype=float
-                    ).ravel()
-                    out = np.zeros(dim, dtype=float)
-                    n = min(dim, v.size)
-                    if n > 0:
-                        out[:n] = v[:n]
-                    input_vec += out.tolist()
-
-            # Field inputs tail (deterministic, fixed; zeros when not provided)
+                self._append_layout_tail(input_vec, self.recv_layout, self.inbox)
             if self.field_layout:
-                for key in sorted(self.field_layout.keys()):
-                    dim = int(self.field_layout[key])
-                    v = np.asarray(
-                        self.field_inputs.get(key, np.zeros(dim, dtype=float)),
-                        dtype=float,
-                    ).ravel()
-                    out = np.zeros(dim, dtype=float)
-                    n = min(dim, v.size)
-                    if n > 0:
-                        out[:n] = v[:n]
-                    input_vec += out.tolist()
+                self._append_layout_tail(input_vec, self.field_layout, self.field_inputs)
 
             return np.asarray(input_vec, dtype=float)
 
@@ -223,36 +214,12 @@ class Cell:
             input_vec.append(float(len(sorted_neighbors)))
 
         # --- Connected messaging tail (deterministic, fixed) -----------------
-        # For each declared recv key (sorted by name), append a fixed-length vector.
-        # If inbox is missing the key, append zeros of the declared dimension.
         if self.recv_layout:
-            for key in sorted(self.recv_layout.keys()):
-                dim = int(self.recv_layout[key])
-                v = np.asarray(
-                    self.inbox.get(key, np.zeros(dim, dtype=float)), dtype=float
-                ).ravel()
-                out = np.zeros(dim, dtype=float)
-                # copy up to dim (truncate or zero-pad)
-                n = min(dim, v.size)
-                if n > 0:
-                    out[:n] = v[:n]
-                input_vec += out.tolist()
+            self._append_layout_tail(input_vec, self.recv_layout, self.inbox)
 
         # --- Field inputs tail (deterministic, fixed) ------------------------
-        # For each declared field key (sorted by name), append a fixed-length vector.
-        # World/FieldRouter must have populated cell.field_inputs before sense().
         if self.field_layout:
-            for key in sorted(self.field_layout.keys()):
-                dim = int(self.field_layout[key])
-                v = np.asarray(
-                    self.field_inputs.get(key, np.zeros(dim, dtype=float)),
-                    dtype=float,
-                ).ravel()
-                out = np.zeros(dim, dtype=float)
-                n = min(dim, v.size)
-                if n > 0:
-                    out[:n] = v[:n]
-                input_vec += out.tolist()
+            self._append_layout_tail(input_vec, self.field_layout, self.field_inputs)
 
         return np.asarray(input_vec, dtype=float)
 
