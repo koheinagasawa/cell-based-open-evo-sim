@@ -14,7 +14,8 @@ import numpy as np
 def compute_spring_forces(particles, *, stiffness: float = 1.0) -> np.ndarray:
     """Return (N, D) force array from spring bonds.
 
-    For each directed edge i->j in conn_out, a Hookean spring force is applied:
+    For each directed edge i->j in conn_out, a Hookean spring force is applied
+    (edge weight is currently unused; only connectivity matters):
       displacement = dist - rest_length
       F_on_i = stiffness * displacement * direction_toward_j
 
