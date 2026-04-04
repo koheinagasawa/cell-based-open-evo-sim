@@ -48,11 +48,15 @@ def init_connections_copy(
     This function is intentionally World-agnostic; it only touches parent/child.
     """
     # Copy weights with optional noise
+    # Use parent's seeded RNG for determinism (child.rng is not yet
+    # attached at init_child time).  Fall back to a fresh default_rng
+    # only when parent has no RNG (e.g. unit tests).
+    rng = getattr(parent, "rng", None) or np.random.default_rng()
     new_edges: dict[str, float] = {}
     for dst_id, w in getattr(parent, "conn_out", {}).items():
         ww = float(w)
         if weight_noise_std and weight_noise_std > 0.0:
-            ww += float(np.random.normal(0.0, weight_noise_std))
+            ww += float(rng.normal(0.0, weight_noise_std))
         if clip_min is not None:
             ww = max(float(clip_min), ww)
         new_edges[str(dst_id)] = ww
