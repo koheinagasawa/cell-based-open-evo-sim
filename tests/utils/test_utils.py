@@ -121,21 +121,6 @@ def _unique_exp_dir(root: pathlib.Path, base_name: str) -> pathlib.Path:
         i += 1
 
 
-def _unique_exp_dir(root: pathlib.Path, base_name: str) -> pathlib.Path:
-    """Create a unique experiment directory under root using base_name."""
-    # Keep it filesystem-safe and not too long
-    name = base_name[:80].rstrip("._-")
-    path = root / name
-    if not path.exists():
-        return path
-    i = 2
-    while True:
-        cand = root / f"{name}_{i:02d}"
-        if not cand.exists():
-            return cand
-        i += 1
-
-
 def prepare_run(
     config_dict: Dict[str, Any],
     session_dir: str | None = None,
