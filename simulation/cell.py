@@ -19,13 +19,13 @@ class Cell:
         neighbor_aggregation: str | None = None,  # {None,'mean','max'}
         include_neighbor_mask=True,
         include_num_neighbors=True,
-        # Legacy spatial-neighbor features (to be phased out later):
+        # Spatial-neighbor features (active when max_neighbors > 0):
         # - max_neighbors:         upper bound for per-neighbor slots (0 disables)
         # - include_neighbor_mask: append K-length mask for padded neighbors
         # - include_num_neighbors: append neighbor count as a scalar tail
         # - neighbor_aggregation:  {'mean','max'} summary BEFORE mask/count tails
-        # These are ignored once the input is built purely from connected messaging
-        # (i.e., recv:* aggregates). New experiments should prefer connected messaging.
+        # When max_neighbors == 0, these are skipped and input is built from
+        # connected messaging (recv:* aggregates) only.
         energy_init: float = 1.0,
         energy_max: float = 1.0,
         **kwargs,

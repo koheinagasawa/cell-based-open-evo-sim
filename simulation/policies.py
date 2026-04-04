@@ -24,13 +24,13 @@ class BaseBudding:
     """
     Base class for budding policies.
     Handles the common physics and economics of budding:
-    - Gate threshold check
-    - Energy check & cost deduction
+    - Gate check (hardcoded > 0.5)
+    - Energy check (must be >= threshold) & cost deduction
     - Offset calculation
     - Basic kwargs preparation
     """
 
-    threshold: float = 0.6
+    threshold: float = 0.6  # minimum energy required to bud
     cost: float = 0.5
     init_energy: float = 0.4
     offset_sigma: float = 0.2
