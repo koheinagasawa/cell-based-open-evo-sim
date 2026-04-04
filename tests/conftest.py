@@ -142,6 +142,7 @@ def world_factory() -> Callable[..., World]:
         use_fields: bool = False,
         birth_callback: Optional[Callable[[World, Dict[str, Any]], None]] = None,
         field_added_callback: Optional[Callable[[World, Dict[str, Any]], None]] = None,
+        physics_solver=None,
     ) -> World:
         return World(
             cells,
@@ -157,6 +158,7 @@ def world_factory() -> Callable[..., World]:
             use_fields=use_fields,
             birth_callback=birth_callback,
             field_added_callback=field_added_callback,
+            physics_solver=physics_solver,
         )
 
     return _factory

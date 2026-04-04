@@ -79,6 +79,7 @@ class World:
         use_fields: bool = False,
         birth_callback: Optional[BirthCallback] = None,
         field_added_callback: Optional[FieldAddedCallback] = None,
+        physics_solver=None,
     ):
         """
         :param seed: master seed for reproducible experiments. If None, use 0.
@@ -119,6 +120,9 @@ class World:
         # Callbacks
         self._birth_callback: Optional[BirthCallback] = birth_callback
         self._field_added_callback: Optional[FieldAddedCallback] = field_added_callback
+
+        # Physics (optional)
+        self.physics_solver = physics_solver
 
         # Performance Metrics
         self.perf_stats: Dict[str, float] = defaultdict(float)
@@ -283,6 +287,14 @@ class World:
         self.perf_stats["time_phase3_apply_actions"] = (
             time.perf_counter() - t_phase3_start
         )
+
+        # --------  Phase 3.5: physics forces (optional) --------
+        if self.physics_solver is not None:
+            t_physics_start = time.perf_counter()
+            self.physics_solver.step(self.cells)
+            self.perf_stats["time_phase3_5_physics"] = (
+                time.perf_counter() - t_physics_start
+            )
 
         t_phase4_start = time.perf_counter()
 
