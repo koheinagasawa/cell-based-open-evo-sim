@@ -204,6 +204,7 @@ class World:
         # 1) (Optionally) Build neighbor snapshots for ALL cells (read-only, previous-frame state)
         # 2) Sense+Act for ALL cells (produce outputs; DO NOT mutate cell.state here)
         # 3) Commit: apply cell.next_state -> cell.state for ALL cells (synchronous state update)
+        # 3.5) Physics forces (optional; spring bonds, collision, etc.)
         # 4) Reproduction, maintenance, deaths, time++ (project-specific policies)
         # 5) Connected messaging + Field routing (two-phase; affect NEXT frame)
 
