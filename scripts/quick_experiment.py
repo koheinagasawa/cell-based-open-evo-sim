@@ -344,7 +344,7 @@ def scenario_physics_body():
         for c in w.cells:
             for dst_id, wt in c.conn_out.items():
                 edges.append((c.id, dst_id, float(wt)))
-        field_frames.append(np.zeros((32, 32), dtype=float))
+        field_frames.append(np.zeros((1, 1), dtype=float))
         cell_frames.append(cell_frame)
         edge_frames.append(edges)
         w.step()
@@ -355,9 +355,19 @@ def scenario_physics_body():
     for c in w.cells:
         for dst_id, wt in c.conn_out.items():
             edges.append((c.id, dst_id, float(wt)))
-    field_frames.append(np.zeros((32, 32), dtype=float))
+    field_frames.append(np.zeros((1, 1), dtype=float))
     cell_frames.append(cell_frame)
     edge_frames.append(edges)
+
+    # Compute field extent from all cell positions across frames
+    all_x, all_y = [], []
+    for cf in cell_frames:
+        for (x, y) in cf.values():
+            all_x.append(x)
+            all_y.append(y)
+    pad = 1.0
+    field_extent = (min(all_x) - pad, max(all_x) + pad,
+                    min(all_y) - pad, max(all_y) + pad)
 
     gif_path = os.path.join(out_dir, "physics_body.gif")
     animate_field_cells_connections(
@@ -370,6 +380,7 @@ def scenario_physics_body():
         figsize=(6, 6),
         cmap="gray",
         show_colorbar=False,
+        field_extent=field_extent,
     )
     return {"out_dir": out_dir, "gif": gif_path}
 

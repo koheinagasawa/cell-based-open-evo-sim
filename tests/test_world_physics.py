@@ -47,7 +47,7 @@ def _record_frame(cells):
     return cell_frame, edges
 
 
-def _blank_field(h=32, w=32):
+def _blank_field(h=1, w=1):
     return np.zeros((h, w), dtype=float)
 
 
@@ -70,6 +70,16 @@ def _run_and_record(world, steps):
 
 def _save_gif(test_output_dir, name, field_frames, cell_frames, edge_frames,
               *, fps=20, trail_len=40, figsize=(5, 5)):
+    # Compute field extent from all cell positions
+    all_x, all_y = [], []
+    for cf in cell_frames:
+        for (x, y) in cf.values():
+            all_x.append(x)
+            all_y.append(y)
+    pad = 0.5
+    field_extent = (min(all_x) - pad, max(all_x) + pad,
+                    min(all_y) - pad, max(all_y) + pad)
+
     out = test_output_dir / f"{name}.gif"
     animate_field_cells_connections(
         out_path=str(out),
@@ -81,6 +91,7 @@ def _save_gif(test_output_dir, name, field_frames, cell_frames, edge_frames,
         figsize=figsize,
         cmap="gray",
         show_colorbar=False,
+        field_extent=field_extent,
     )
     assert out.exists() and out.stat().st_size > 0
 
