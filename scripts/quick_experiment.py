@@ -16,8 +16,9 @@ from experiments.common.runner_generic import world_factory
 from experiments.run_experiment import run_experiment_quick
 from simulation.interpreter import SlotBasedInterpreter
 from simulation.physics.solver import PhysicsSolver
-from simulation.policies import ParentChildLinkWrapper, SimpleBudding
+from simulation.policies import BaseBudding, ParentChildLinkWrapper, SimpleBudding
 from simulation.input_layout import InputLayout
+from dataclasses import dataclass
 
 
 # ============================================================
@@ -385,9 +386,172 @@ def scenario_physics_body():
     return {"out_dir": out_dir, "gif": gif_path}
 
 
+class _BuddingLeaderGenome:
+    """Leader cell: random walks and periodically buds."""
+
+    def __init__(self, speed=0.12, bud_prob=0.08):
+        self.speed = speed
+        self.bud_prob = bud_prob
+
+    def activate(self, inputs):
+        state = inputs[2:6]
+        vx, vy = state[0], state[1]
+        if vx == 0 and vy == 0:
+            ang = np.random.uniform(0, 2 * np.pi)
+            vx, vy = np.cos(ang), np.sin(ang)
+        ang = np.arctan2(vy, vx) + np.random.normal(0, 0.3)
+        vx = np.cos(ang) * self.speed
+        vy = np.sin(ang) * self.speed
+        new_state = np.zeros(4)
+        new_state[0], new_state[1] = vx, vy
+        bud_signal = 1.0 if np.random.random() < self.bud_prob else 0.0
+        return {
+            "state": new_state,
+            "move": np.array([vx, vy]),
+            "bud": np.array([bud_signal]),
+        }
+
+
+class _BuddingPassiveGenome:
+    """Passive cell that occasionally buds but doesn't move voluntarily."""
+
+    def __init__(self, bud_prob=0.03):
+        self.bud_prob = bud_prob
+
+    def activate(self, inputs):
+        bud_signal = 1.0 if np.random.random() < self.bud_prob else 0.0
+        return {
+            "state": np.zeros(4),
+            "move": np.zeros(2),
+            "bud": np.array([bud_signal]),
+        }
+
+
+def scenario_budding_body():
+    """Growing body: single cell buds into a connected body held by springs."""
+    from simulation.cell import Cell
+    from experiments.common.runner_generic import world_factory as wf_module
+    from tests.utils.visualization2d import animate_field_cells_connections
+
+    interp = lambda: SlotBasedInterpreter({
+        "state": slice(0, 4),
+        "move": slice(4, 6),
+        "bud": 6,
+    })
+
+    # Start with a single leader cell
+    leader = Cell(
+        [0.0, 0.0],
+        _BuddingLeaderGenome(speed=0.12, bud_prob=0.05),
+        id="cell_0",
+        interpreter=interp(),
+        state_size=4,
+        max_neighbors=0,
+        radius=0.4,
+        energy_init=1.0,
+        energy_max=1.0,
+    )
+
+    # Energy policy: slow drain so cells live long enough to grow
+    from simulation.policies import ConstantMaintenance
+    energy_policy = ConstantMaintenance(maintenance=0.002)
+
+    out_dir = make_unique_outdir()
+    solver = PhysicsSolver(dt=0.05, repulsion_stiffness=3.0, spring_stiffness=3.0)
+
+    # Child cells should use passive genome
+    _passive = _BuddingPassiveGenome(bud_prob=0.02)
+    child_counter = [0]
+
+    @dataclass(frozen=True)
+    class _PassiveBudding(BaseBudding):
+        """Budding that creates passive children with unique IDs."""
+
+        def _create_child(self, world, parent, position, cell_kwargs, extra_data):
+            child_counter[0] += 1
+            return Cell(
+                position=position,
+                genome=_passive,
+                interpreter=interp(),
+                id=f"cell_{child_counter[0]}",
+                radius=0.4,
+                **cell_kwargs,
+            )
+
+    bud_policy = ParentChildLinkWrapper(
+        _PassiveBudding(
+            threshold=0.3,
+            cost=0.2,
+            init_energy=0.8,
+            offset_sigma=0.3,
+        ),
+        weight=1.0,
+        bidirectional=True,
+    )
+
+    w = wf_module()(
+        [leader],
+        seed=42,
+        physics_solver=solver,
+        energy_policy=energy_policy,
+        reproduction_policy=bud_policy,
+    )
+
+    field_frames, cell_frames, edge_frames = [], [], []
+    steps = 200
+    for _ in range(steps):
+        cell_frame = {c.id: (float(c.position[0]), float(c.position[1])) for c in w.cells}
+        edges = []
+        for c in w.cells:
+            for dst_id, wt in c.conn_out.items():
+                edges.append((c.id, dst_id, float(wt)))
+        field_frames.append(np.zeros((1, 1), dtype=float))
+        cell_frames.append(cell_frame)
+        edge_frames.append(edges)
+        w.step()
+
+    # Final frame
+    cell_frame = {c.id: (float(c.position[0]), float(c.position[1])) for c in w.cells}
+    edges = []
+    for c in w.cells:
+        for dst_id, wt in c.conn_out.items():
+            edges.append((c.id, dst_id, float(wt)))
+    field_frames.append(np.zeros((1, 1), dtype=float))
+    cell_frames.append(cell_frame)
+    edge_frames.append(edges)
+
+    # Compute field extent
+    all_x, all_y = [], []
+    for cf in cell_frames:
+        for (x, y) in cf.values():
+            all_x.append(x)
+            all_y.append(y)
+    pad = 1.0
+    field_extent = (min(all_x) - pad, max(all_x) + pad,
+                    min(all_y) - pad, max(all_y) + pad)
+
+    gif_path = os.path.join(out_dir, "budding_body.gif")
+    animate_field_cells_connections(
+        out_path=gif_path,
+        field_frames=field_frames,
+        cell_frames=cell_frames,
+        edge_frames=edge_frames,
+        fps=20,
+        trail_len=30,
+        figsize=(6, 6),
+        cmap="gray",
+        show_colorbar=False,
+        field_extent=field_extent,
+    )
+
+    print(f"Final cell count: {len(w.cells)}")
+    return {"out_dir": out_dir, "gif": gif_path}
+
+
 SCENARIOS = {
     "chemotaxis_bud": scenario_chemotaxis_bud,
     "physics_body": scenario_physics_body,
+    "budding_body": scenario_budding_body,
 }
 
 # ------------------------------------------------------------
@@ -404,8 +568,8 @@ if __name__ == "__main__":
     print(f"Running scenario: {name}")
     scenario_fn = SCENARIOS[name]
 
-    if name == "physics_body":
-        # physics_body builds its own world, returns result dict directly
+    if name in ("physics_body", "budding_body"):
+        # These scenarios build their own world, return result dict directly
         result = scenario_fn()
     else:
         kwargs = scenario_fn()
