@@ -124,6 +124,7 @@ def build_spec_quick(
     sample_every: int = 1,
     log_events: bool = True,
     metric_hooks: Optional[list] = None,
+    physics_solver=None,
 ) -> ExperimentSpec:
     """Construct a scene-agnostic ExperimentSpec from implementations."""
     field_specs = []
@@ -187,6 +188,7 @@ def build_spec_quick(
         sample_every=int(sample_every),  # integer counter in dumper
         log_events=log_events,
         metric_hooks=list(metric_hooks or []),
+        physics_solver=physics_solver,
     )
 
 
@@ -223,6 +225,7 @@ def run_experiment_quick(
     make_gif: bool = True,
     gif_name: str = "field_conn_traj.gif",
     metric_hooks: Optional[list] = None,
+    physics_solver=None,
 ) -> Dict[str, Any]:
     """
     Run an experiment by passing implementations (scene-agnostic) and optionally render a GIF.
@@ -254,6 +257,7 @@ def run_experiment_quick(
         sample_every=sample_every,
         log_events=True,
         metric_hooks=metric_hooks,
+        physics_solver=physics_solver,
     )
 
     res = run_experiment(spec)

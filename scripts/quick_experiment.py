@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from experiments.common.runner_generic import world_factory
 from experiments.run_experiment import run_experiment_quick
 from simulation.interpreter import SlotBasedInterpreter
+from simulation.physics.solver import PhysicsSolver
 from simulation.policies import ParentChildLinkWrapper, SimpleBudding
 from simulation.input_layout import InputLayout
 
@@ -224,6 +225,7 @@ result = run_experiment_quick(
     fields=[("C", 20.0, 0.9)], 
     sample_every=5,  # record every 5th step to speed up visualization
     make_gif=True,  # automatically create GIF
+    physics_solver=PhysicsSolver(dt=0.05, repulsion_stiffness=2.0, spring_stiffness=2.0),
 )
 
 # ------------------------------------------------------------

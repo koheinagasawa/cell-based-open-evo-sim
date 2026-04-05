@@ -53,3 +53,4 @@ class ExperimentSpec:
     sample_every: int = 1
     log_events: bool = True
     metric_hooks: List[MetricsHook] = field(default_factory=list)
+    physics_solver: Any = None
