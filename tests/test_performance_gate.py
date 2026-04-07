@@ -1,7 +1,7 @@
-"""Performance gate: 100 cells × 200 steps with physics must complete within budget.
+"""Performance gate: 100 cells x 200 steps with physics must complete within budget.
 
 Roadmap Phase 1 requirement:
-  "100体×200ステップを数百ms〜数秒以内。閾値超なら近傍・入力構築をまず最適化。"
+  "100 particles x 200 steps must complete within a few hundred ms to a few seconds. If the threshold is exceeded, first optimize neighbor and input construction."
 """
 import time
 

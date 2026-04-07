@@ -114,7 +114,7 @@ class TestWorldPhysicsIntegration:
         assert a.position[0] < pos_a_before[0]
         assert b.position[0] > pos_b_before[0]
 
-        _save_gif(test_output_dir, "physics_repulsion", ff, cf, ef)
+        #_save_gif(test_output_dir, "physics_repulsion", ff, cf, ef)
 
     def test_bonded_cells_equilibrium(self, world_factory, test_output_dir):
         """Bonded cells converge to rest length from stretched state. Outputs GIF."""
@@ -128,8 +128,8 @@ class TestWorldPhysicsIntegration:
         dist = np.linalg.norm(b.position - a.position)
         np.testing.assert_allclose(dist, 1.0, atol=0.05)
 
-        _save_gif(test_output_dir, "physics_spring_equilibrium", ff, cf, ef,
-                  trail_len=60)
+        #_save_gif(test_output_dir, "physics_spring_equilibrium", ff, cf, ef,
+        #          trail_len=60)
 
     def test_no_solver_no_physics(self, world_factory):
         """Without solver, overlapping cells stay where move puts them."""
@@ -185,8 +185,8 @@ class TestWorldPhysicsIntegration:
         w = world_factory(cells, physics_solver=solver)
         ff, cf, ef = _run_and_record(w, steps=200)
 
-        _save_gif(test_output_dir, "physics_agent_body", ff, cf, ef,
-                  trail_len=30, figsize=(6, 6))
+        #_save_gif(test_output_dir, "physics_agent_body", ff, cf, ef,
+        #          trail_len=30, figsize=(6, 6))
 
     def test_two_agents_collision(self, world_factory, test_output_dir):
         """Two 3-cell agents approach and repel each other. Outputs GIF."""
@@ -233,6 +233,6 @@ class TestWorldPhysicsIntegration:
         cell_frames.append(cf)
         edge_frames.append(ef)
 
-        _save_gif(test_output_dir, "physics_two_agents_collision",
-                  field_frames, cell_frames, edge_frames,
-                  figsize=(7, 5))
+        #_save_gif(test_output_dir, "physics_two_agents_collision",
+        #          field_frames, cell_frames, edge_frames,
+        #          figsize=(7, 5))
