@@ -145,6 +145,7 @@ def build_spec_quick(
             max_neighbors = 0
             energy_init = 1.0
             energy_max = 1.0
+            radius = 0.5
         elif isinstance(item, dict):
             count = item["count"]
             positioner = item["positioner"]
@@ -154,6 +155,7 @@ def build_spec_quick(
             max_neighbors = int(item.get("max_neighbors", 0))
             energy_init = float(item.get("energy_init", 1.0))
             energy_max = float(item.get("energy_max", 1.0))
+            radius = float(item.get("radius", 0.5))
         else:
             raise TypeError("Each population must be a tuple or dict.")
 
@@ -167,6 +169,7 @@ def build_spec_quick(
                 energy_init=energy_init,
                 energy_max=energy_max,
                 max_neighbors=max_neighbors,
+                radius=radius,
             )
         )
 
@@ -203,6 +206,7 @@ class PopulationQuickDict(TypedDict, total=False):
     max_neighbors: int
     energy_init: float
     energy_max: float
+    radius: float
 
 
 PopulationQuick = Union[
@@ -232,7 +236,8 @@ def run_experiment_quick(
 
     populations supports two formats:
       1) Tuple style: (count, positioner, genome_factory)
-         - recv_layout/field_layout/max_neighbors are defaulted to {} / {} / 0.
+         - recv_layout/field_layout/max_neighbors/energy_init/energy_max/radius
+           are defaulted to {} / {} / 0 / 1.0 / 1.0 / 0.5.
       2) Dict style:
          {
            "count": int,
@@ -243,6 +248,7 @@ def run_experiment_quick(
            "max_neighbors": int,        # optional
            "energy_init": float,        # optional
            "energy_max": float,         # optional
+           "radius": float,             # optional; cell radius for physics (default 0.5)
          }
     """
     spec = build_spec_quick(

@@ -33,6 +33,7 @@ class PopulationSpec:
     energy_init: float = 1.0
     energy_max: float = 1.0
     max_neighbors: int = 0
+    radius: float = 0.5
 
 
 @dataclass

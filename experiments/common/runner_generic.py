@@ -100,6 +100,7 @@ def run_experiment(spec: ExperimentSpec) -> Dict[str, np.ndarray]:
                     field_layout=pop.field_layout,
                     energy_init=pop.energy_init,
                     energy_max=pop.energy_max,
+                    radius=pop.radius,
                 )
             )
 
