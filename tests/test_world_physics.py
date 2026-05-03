@@ -262,3 +262,42 @@ class TestWorldPhysicsIntegration:
         #_save_gif(test_output_dir, "physics_two_agents_collision",
         #          field_frames, cell_frames, edge_frames,
         #          figsize=(7, 5))
+
+        # --- Physics-behavior assertions ---
+
+        a_cells = [a1, a2, a3]
+        b_cells = [b1, b2, b3]
+
+        # 1. The two groups should not have collapsed into a single blob;
+        #    their centroids must be clearly separated after the simulation.
+        centroid_a = np.mean([c.position for c in a_cells], axis=0)
+        centroid_b = np.mean([c.position for c in b_cells], axis=0)
+        centroid_sep = np.linalg.norm(centroid_b - centroid_a)
+        assert centroid_sep > 0.5, (
+            f"Group centroids collapsed too close after collision: "
+            f"separation={centroid_sep:.3f}"
+        )
+
+        # 2. Verify the groups actually collided and moved through to
+        #    opposite sides: group A (started at x=-2, moved right) should
+        #    have its centroid at positive x, group B (started at x=2,
+        #    moved left) at negative x.
+        assert centroid_a[0] > 0.0, (
+            f"Group A centroid x={centroid_a[0]:.3f} expected > 0 after crossing"
+        )
+        assert centroid_b[0] < 0.0, (
+            f"Group B centroid x={centroid_b[0]:.3f} expected < 0 after crossing"
+        )
+
+        # 3. Outer cells of opposite groups (which are free to separate
+        #    along x) should be pushed apart beyond their combined radii.
+        combined_radius = a1.radius + b1.radius
+        separation_tolerance = 0.05  # numerical settling allowance
+        for ca in [a2, a3]:      # outer cells of group A
+            for cb in [b2, b3]:  # outer cells of group B
+                dist = np.linalg.norm(ca.position - cb.position)
+                assert dist >= combined_radius - separation_tolerance, (
+                    f"Outer cells {ca.id} and {cb.id} still overlap after "
+                    f"repulsion: dist={dist:.3f} < "
+                    f"{combined_radius - separation_tolerance:.3f}"
+                )
