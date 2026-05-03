@@ -28,6 +28,7 @@ class Cell:
         # connected messaging (recv:* aggregates) only.
         energy_init: float = 1.0,
         energy_max: float = 1.0,
+        radius: float = 0.5,
         **kwargs,
     ):
         self.id = id or str(uuid.uuid4())
@@ -72,6 +73,7 @@ class Cell:
 
         self.energy_max = float(energy_max)
         self.energy = float(energy_init)
+        self.radius = float(radius)
 
         self.age = 0
         self.raw_output = None  # Last raw output vector from genome

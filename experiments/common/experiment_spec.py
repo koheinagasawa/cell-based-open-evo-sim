@@ -33,6 +33,7 @@ class PopulationSpec:
     energy_init: float = 1.0
     energy_max: float = 1.0
     max_neighbors: int = 0
+    radius: float = 0.5
 
 
 @dataclass
@@ -53,3 +54,4 @@ class ExperimentSpec:
     sample_every: int = 1
     log_events: bool = True
     metric_hooks: List[MetricsHook] = field(default_factory=list)
+    physics_solver: Any = None

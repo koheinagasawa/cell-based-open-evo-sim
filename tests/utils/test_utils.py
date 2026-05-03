@@ -163,7 +163,7 @@ def prepare_run(
         "action_size": run_config.action_size,
         "steps": run_config.steps,
         "seed": run_config.seed,
-        "experiment_name": exp_dir.name,  # ← 追加で残す
+        "experiment_name": exp_dir.name,  # keep for metadata
         "interpreter_class": interpreter.__class__.__name__ if interpreter else None,
         "interpreter_module": interpreter.__class__.__module__ if interpreter else None,
         "user_metadata": run_config.metadata or {},

@@ -124,6 +124,7 @@ def build_spec_quick(
     sample_every: int = 1,
     log_events: bool = True,
     metric_hooks: Optional[list] = None,
+    physics_solver=None,
 ) -> ExperimentSpec:
     """Construct a scene-agnostic ExperimentSpec from implementations."""
     field_specs = []
@@ -144,6 +145,7 @@ def build_spec_quick(
             max_neighbors = 0
             energy_init = 1.0
             energy_max = 1.0
+            radius = 0.5
         elif isinstance(item, dict):
             count = item["count"]
             positioner = item["positioner"]
@@ -153,6 +155,7 @@ def build_spec_quick(
             max_neighbors = int(item.get("max_neighbors", 0))
             energy_init = float(item.get("energy_init", 1.0))
             energy_max = float(item.get("energy_max", 1.0))
+            radius = float(item.get("radius", 0.5))
         else:
             raise TypeError("Each population must be a tuple or dict.")
 
@@ -166,6 +169,7 @@ def build_spec_quick(
                 energy_init=energy_init,
                 energy_max=energy_max,
                 max_neighbors=max_neighbors,
+                radius=radius,
             )
         )
 
@@ -187,6 +191,7 @@ def build_spec_quick(
         sample_every=int(sample_every),  # integer counter in dumper
         log_events=log_events,
         metric_hooks=list(metric_hooks or []),
+        physics_solver=physics_solver,
     )
 
 
@@ -201,6 +206,7 @@ class PopulationQuickDict(TypedDict, total=False):
     max_neighbors: int
     energy_init: float
     energy_max: float
+    radius: float
 
 
 PopulationQuick = Union[
@@ -223,13 +229,15 @@ def run_experiment_quick(
     make_gif: bool = True,
     gif_name: str = "field_conn_traj.gif",
     metric_hooks: Optional[list] = None,
+    physics_solver=None,
 ) -> Dict[str, Any]:
     """
     Run an experiment by passing implementations (scene-agnostic) and optionally render a GIF.
 
     populations supports two formats:
       1) Tuple style: (count, positioner, genome_factory)
-         - recv_layout/field_layout/max_neighbors are defaulted to {} / {} / 0.
+         - recv_layout/field_layout/max_neighbors/energy_init/energy_max/radius
+           are defaulted to {} / {} / 0 / 1.0 / 1.0 / 0.5.
       2) Dict style:
          {
            "count": int,
@@ -240,6 +248,7 @@ def run_experiment_quick(
            "max_neighbors": int,        # optional
            "energy_init": float,        # optional
            "energy_max": float,         # optional
+           "radius": float,             # optional; cell radius for physics (default 0.5)
          }
     """
     spec = build_spec_quick(
@@ -254,6 +263,7 @@ def run_experiment_quick(
         sample_every=sample_every,
         log_events=True,
         metric_hooks=metric_hooks,
+        physics_solver=physics_solver,
     )
 
     res = run_experiment(spec)

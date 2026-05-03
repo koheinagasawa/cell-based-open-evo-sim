@@ -680,7 +680,7 @@ def test_budding_logs_birth_and_draws_arrows(world_factory, interpreter4):
         weight_labels=True,
         weight_fmt="{:.2f}",
         min_abs_w=0.05,  # hide tiny edges
-        curve_bidirectional=True,  # A<->B を少し曲げて重なり解消
+        curve_bidirectional=True,  # curve A<->B edges slightly to avoid overlap
         scale=1.2,
         alpha=0.9,
     )

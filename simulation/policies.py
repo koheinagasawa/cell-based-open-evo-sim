@@ -204,18 +204,12 @@ class ParentChildLinkWrapper:
         """Delegate to base policy while injecting the link after child creation."""
 
         def _spawn(child, parent, metadata=None):
-            # Create parent -> child link
-            try:
-                parent.set_connections([(child.id, self.weight)])
-            except Exception as e:
-                raise RuntimeError(f"Failed to set parent->child connection: {e}")
+            # Create parent -> child link (additive, preserves existing connections)
+            parent.conn_out[str(child.id)] = self.weight
 
             # Optionally create child -> parent link
             if self.bidirectional:
-                try:
-                    child.set_connections([(parent.id, self.weight)])
-                except Exception as e:
-                    raise RuntimeError(f"Failed to set child->parent connection: {e}")
+                child.conn_out[str(parent.id)] = self.weight
 
             # Forward to world spawn buffer
             meta = dict(metadata or {})
