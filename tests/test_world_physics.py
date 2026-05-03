@@ -185,6 +185,32 @@ class TestWorldPhysicsIntegration:
         w = world_factory(cells, physics_solver=solver)
         ff, cf, ef = _run_and_record(w, steps=200)
 
+        center_pos = cells[0].position.copy()
+        ring_positions = np.array([cell.position.copy() for cell in cells[1:]])
+        ring_centroid = ring_positions.mean(axis=0)
+
+        # The center should remain near the centroid of the ring.
+        np.testing.assert_allclose(center_pos, ring_centroid, atol=0.2)
+
+        # The ring should relax to roughly the intended radius from the center.
+        center_to_ring = np.linalg.norm(ring_positions - center_pos, axis=1)
+        np.testing.assert_allclose(center_to_ring, np.full(6, 0.8), atol=0.2)
+
+        # Neighboring ring cells should be spaced like a regular hexagon.
+        neighbor_distances = np.array([
+            np.linalg.norm(ring_positions[i] - ring_positions[(i + 1) % 6])
+            for i in range(6)
+        ])
+        np.testing.assert_allclose(neighbor_distances, np.full(6, 0.8), atol=0.2)
+
+        # Opposite ring cells should remain farther apart than neighbors,
+        # guarding against collapse into a non-hexagonal shape.
+        opposite_distances = np.array([
+            np.linalg.norm(ring_positions[i] - ring_positions[(i + 3) % 6])
+            for i in range(3)
+        ])
+        assert np.all(opposite_distances > 1.2)
+
         #_save_gif(test_output_dir, "physics_agent_body", ff, cf, ef,
         #          trail_len=30, figsize=(6, 6))
 
