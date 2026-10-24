@@ -1,10 +1,11 @@
-"""Direct, stateless evaluation of feedforward CPPNs with declared I/O sizes."""
+"""Immutable feedforward CPPNs with direct evaluation and fixed-graph mutation."""
 
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from heapq import heapify, heappop, heappush
 from numbers import Integral, Real
+from typing import Literal
 
 import numpy as np
 
@@ -60,6 +61,43 @@ class ConnectionGene:
     source: int
     target: int
     weight: float
+
+
+@dataclass(frozen=True)
+class MutationConfig:
+    """Explicit per-gene probabilities and Gaussian perturbation scales."""
+
+    weight_probability: float
+    bias_probability: float
+    activation_probability: float
+    weight_std: float
+    bias_std: float
+
+    def __post_init__(self) -> None:
+        for name in (
+            "weight_probability",
+            "bias_probability",
+            "activation_probability",
+            "weight_std",
+            "bias_std",
+        ):
+            value = _finite_real(getattr(self, name), name)
+            if name.endswith("_probability"):
+                if not 0.0 <= value <= 1.0:
+                    raise ValueError(f"{name} must be in [0, 1]")
+            elif value < 0.0:
+                raise ValueError(f"{name} must be nonnegative")
+            object.__setattr__(self, name, value)
+
+
+@dataclass(frozen=True)
+class MutationRecord:
+    """One actual change; gene_id is a node ID or a (source, target) edge."""
+
+    parameter: Literal["weight", "bias", "activation"]
+    gene_id: int | tuple[int, int]
+    before: float | str
+    after: float | str
 
 
 @dataclass(frozen=True)
@@ -271,6 +309,84 @@ class CPPNGenome:
             connections=self.connections,
             output_ids=self.output_ids,
         )
+
+    def mutate(
+        self, config: MutationConfig, rng: np.random.Generator
+    ) -> tuple["CPPNGenome", tuple[MutationRecord, ...]]:
+        """Return an independent child and actual changes, keeping graph/I/O fixed.
+
+        Visit nodes by ID (bias, then activation), then edges by (source, target).
+        Disabled parameters consume no draws. Enabled parameters draw a gate even
+        at probability one, followed by noise or an alternative activation index.
+        Non-finite mutations raise FloatingPointError without clipping or retry;
+        the parent stays unchanged, but consumed RNG draws are not rolled back.
+        """
+        if not isinstance(config, MutationConfig):
+            raise ValueError("config must be a MutationConfig")
+        if not isinstance(rng, np.random.Generator):
+            raise ValueError("rng must be an explicit numpy.random.Generator")
+        records: list[MutationRecord] = []
+
+        def mutate_number(
+            value: float,
+            probability: float,
+            std: float,
+            parameter: Literal["weight", "bias"],
+            gene_id: int | tuple[int, int],
+        ) -> float:
+            if probability == 0.0 or std == 0.0:
+                return value
+            if rng.random() >= probability:
+                return value
+            changed = value + float(rng.normal(0.0, std))
+            if not math.isfinite(changed):
+                raise FloatingPointError(
+                    f"non-finite mutation of {parameter} at gene {gene_id}"
+                )
+            if changed != value:
+                records.append(MutationRecord(parameter, gene_id, value, changed))
+            return changed
+
+        nodes: list[NodeGene] = []
+        for node in self.nodes:
+            bias = mutate_number(
+                node.bias, config.bias_probability, config.bias_std, "bias", node.id
+            )
+            activation = node.activation
+            if (
+                config.activation_probability > 0.0
+                and rng.random() < config.activation_probability
+            ):
+                alternatives = tuple(
+                    name for name in sorted(_ACTIVATIONS) if name != activation
+                )
+                activation = alternatives[int(rng.integers(len(alternatives)))]
+                records.append(
+                    MutationRecord("activation", node.id, node.activation, activation)
+                )
+            nodes.append(NodeGene(node.id, activation, bias))
+        connections = [
+            ConnectionGene(
+                edge.source,
+                edge.target,
+                mutate_number(
+                    edge.weight,
+                    config.weight_probability,
+                    config.weight_std,
+                    "weight",
+                    (edge.source, edge.target),
+                ),
+            )
+            for edge in self.connections
+        ]
+        child = type(self)(
+            input_size=self.input_size,
+            output_size=self.output_size,
+            nodes=nodes,
+            connections=connections,
+            output_ids=self.output_ids,
+        )
+        return child, tuple(records)
 
     def activate(
         self,
