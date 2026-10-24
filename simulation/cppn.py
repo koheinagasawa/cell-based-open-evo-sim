@@ -41,6 +41,11 @@ def _finite_real(value: object, label: str) -> float:
     return result
 
 
+def _check_fields(data: dict[str, object], expected: set[str], label: str) -> None:
+    if data.keys() != expected:
+        raise ValueError(f"{label} fields must be exactly {sorted(expected)}")
+
+
 @dataclass(frozen=True)
 class NodeGene:
     """A computed node; IDs below the genome's input_size are implicit inputs."""
@@ -182,6 +187,89 @@ class CPPNGenome:
                 tuple(sorted(incoming[node.id], key=lambda edge: edge.source))
                 for node in order
             ),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        """Export fresh JSON-compatible genotype data, excluding derived caches."""
+        return {
+            "schema_version": 1,
+            "input_size": self.input_size,
+            "output_size": self.output_size,
+            "nodes": [
+                {"id": node.id, "activation": node.activation, "bias": node.bias}
+                for node in self.nodes
+            ],
+            "connections": [
+                {"source": edge.source, "target": edge.target, "weight": edge.weight}
+                for edge in self.connections
+            ],
+            "output_ids": list(self.output_ids),
+        }
+
+    @classmethod
+    def from_dict(cls, data: object) -> "CPPNGenome":
+        """Restore schema version 1; malformed data raises ValueError."""
+        if not isinstance(data, dict):
+            raise ValueError("genotype must be a dictionary")
+        _check_fields(
+            data,
+            {
+                "schema_version",
+                "input_size",
+                "output_size",
+                "nodes",
+                "connections",
+                "output_ids",
+            },
+            "genotype",
+        )
+        version = data["schema_version"]
+        if type(version) is not int or version != 1:
+            raise ValueError("schema_version must be the integer 1")
+        for name in ("nodes", "connections", "output_ids"):
+            if not isinstance(data[name], list):
+                raise ValueError(f"{name} must be a JSON array")
+
+        nodes: list[NodeGene] = []
+        for record in data["nodes"]:
+            if not isinstance(record, dict):
+                raise ValueError("nodes must contain dictionaries")
+            _check_fields(record, {"id", "activation", "bias"}, "nodes")
+            nodes.append(
+                NodeGene(
+                    id=record["id"],
+                    activation=record["activation"],
+                    bias=record["bias"],
+                )
+            )
+        connections: list[ConnectionGene] = []
+        for record in data["connections"]:
+            if not isinstance(record, dict):
+                raise ValueError("connections must contain dictionaries")
+            _check_fields(record, {"source", "target", "weight"}, "connections")
+            connections.append(
+                ConnectionGene(
+                    source=record["source"],
+                    target=record["target"],
+                    weight=record["weight"],
+                )
+            )
+        return cls(
+            input_size=data["input_size"],
+            output_size=data["output_size"],
+            nodes=nodes,
+            connections=connections,
+            output_ids=data["output_ids"],
+        )
+
+    def copy(self) -> "CPPNGenome":
+        """Rebuild an independent immutable genotype and its derived caches."""
+        return type(self)(
+            input_size=self.input_size,
+            output_size=self.output_size,
+            nodes=self.nodes,
+            connections=self.connections,
+            output_ids=self.output_ids,
         )
 
     def activate(

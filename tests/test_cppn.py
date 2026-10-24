@@ -1,4 +1,5 @@
-from dataclasses import FrozenInstanceError
+import json
+from dataclasses import FrozenInstanceError, replace
 
 import numpy as np
 import pytest
@@ -343,3 +344,212 @@ def test_shared_genome_uses_existing_cell_and_profiled_interpreter_vector_path()
     assert not np.shares_memory(first.next_state, second.next_state)
     first.next_state[0] = -1.0
     assert second.next_state[0] == 6.0
+
+
+def make_serialization_genome():
+    return CPPNGenome(
+        input_size=2,
+        output_size=2,
+        nodes=(
+            NodeGene(20, "identity", -0.25),
+            NodeGene(9, "gaussian", 0.75),
+            NodeGene(5, "sin", -0.5),
+            NodeGene(2, "tanh", 0.125),
+        ),
+        connections=(
+            ConnectionGene(5, 9, 0.25),
+            ConnectionGene(2, 5, -2.0),
+            ConnectionGene(1, 2, -0.75),
+            ConnectionGene(0, 2, 1.5),
+        ),
+        output_ids=(9, 5),
+    )
+
+
+def test_serialization_declares_only_versioned_genotype_data():
+    assert make_serialization_genome().to_dict() == {
+        "schema_version": 1,
+        "input_size": 2,
+        "output_size": 2,
+        "nodes": [
+            {"id": 2, "activation": "tanh", "bias": 0.125},
+            {"id": 5, "activation": "sin", "bias": -0.5},
+            {"id": 9, "activation": "gaussian", "bias": 0.75},
+            {"id": 20, "activation": "identity", "bias": -0.25},
+        ],
+        "connections": [
+            {"source": 0, "target": 2, "weight": 1.5},
+            {"source": 1, "target": 2, "weight": -0.75},
+            {"source": 2, "target": 5, "weight": -2.0},
+            {"source": 5, "target": 9, "weight": 0.25},
+        ],
+        "output_ids": [9, 5],
+    }
+
+
+@pytest.mark.parametrize("genome", [make_serialization_genome(), make_genome()])
+def test_standard_json_file_round_trip_preserves_genotype_and_outputs(tmp_path, genome):
+    path = tmp_path / "genotype.json"
+    with path.open("w", encoding="utf-8") as stream:
+        json.dump(genome.to_dict(), stream, allow_nan=False)
+    with path.open(encoding="utf-8") as stream:
+        restored = CPPNGenome.from_dict(json.load(stream))
+    assert restored == genome
+    assert restored is not genome
+    for value in (-1.0, 0.0, 0.75):
+        inputs = np.full(genome.input_size, value)
+        np.testing.assert_array_equal(
+            restored.activate(inputs), genome.activate(inputs)
+        )
+
+
+def test_serialization_is_independent_of_node_and_connection_declaration_order():
+    genome = make_serialization_genome()
+    reordered = replace(
+        genome,
+        nodes=tuple(reversed(genome.nodes)),
+        connections=tuple(reversed(genome.connections)),
+    )
+    assert reordered.to_dict() == genome.to_dict()
+    data = genome.to_dict()
+    data["nodes"].reverse()
+    data["connections"].reverse()
+    assert CPPNGenome.from_dict(data).to_dict() == genome.to_dict()
+
+
+def test_serialization_normalizes_numpy_parameters_to_json_native_values():
+    genome = CPPNGenome(
+        input_size=np.int64(1),
+        output_size=np.int64(1),
+        nodes=[NodeGene(np.int64(1), "identity", np.float32(0.25))],
+        connections=[ConnectionGene(np.int64(0), np.int64(1), np.float64(1.5))],
+        output_ids=[np.int64(1)],
+    )
+    restored = CPPNGenome.from_dict(json.loads(json.dumps(genome.to_dict())))
+    assert restored == genome
+
+
+def test_exported_data_and_restored_genome_do_not_share_mutable_storage():
+    parent = make_serialization_genome()
+    expected = parent.to_dict()
+    data = parent.to_dict()
+    child = CPPNGenome.from_dict(data)
+    data["nodes"][0]["bias"] = 0.875
+    data["connections"][0]["weight"] = -0.5
+    data["output_ids"].reverse()
+    changed_child = CPPNGenome.from_dict(data)
+    data["nodes"].clear()
+    data["connections"].clear()
+    data["output_ids"].clear()
+    assert parent.to_dict() == child.to_dict() == expected
+    assert changed_child.nodes[0].bias == 0.875
+    assert changed_child.connections[0].weight == -0.5
+    assert changed_child.output_ids == (5, 9)
+    assert not np.array_equal(
+        changed_child.activate([0.5, -0.25]), parent.activate([0.5, -0.25])
+    )
+
+
+def test_copy_is_an_independent_immutable_genotype():
+    parent = make_serialization_genome()
+    expected = parent.activate([0.5, -0.25])
+    child = parent.copy()
+    assert child == parent
+    assert child is not parent
+    assert all(a is not b for a, b in zip(parent.nodes, child.nodes))
+    assert all(a is not b for a, b in zip(parent.connections, child.connections))
+    changed_child = replace(
+        child, nodes=(replace(child.nodes[0], bias=0.875), *child.nodes[1:])
+    )
+    assert not np.array_equal(changed_child.activate([0.5, -0.25]), expected)
+    np.testing.assert_array_equal(parent.activate([0.5, -0.25]), expected)
+    np.testing.assert_array_equal(child.activate([0.5, -0.25]), expected)
+    with pytest.raises(FrozenInstanceError):
+        child.nodes[0].bias = 99.0
+    with pytest.raises(FrozenInstanceError):
+        child.connections[0].weight = 99.0
+
+
+@pytest.mark.parametrize("data", [None, [], "genotype", 1])
+def test_restore_rejects_non_dictionary_data(data):
+    with pytest.raises(ValueError, match="genotype"):
+        CPPNGenome.from_dict(data)
+
+
+@pytest.mark.parametrize("section", ["genotype", "nodes", "connections"])
+@pytest.mark.parametrize("operation", ["missing", "extra"])
+def test_restore_rejects_missing_and_unknown_fields(section, operation):
+    data = make_serialization_genome().to_dict()
+    record = data if section == "genotype" else data[section][0]
+    if operation == "missing":
+        record.pop(next(iter(record)))
+    else:
+        record["unexpected"] = 1
+    with pytest.raises(ValueError, match="fields"):
+        CPPNGenome.from_dict(data)
+
+
+@pytest.mark.parametrize("version", [0, 2, True, 1.0, "1", None])
+def test_restore_rejects_unsupported_or_mistyped_schema_version(version):
+    data = make_serialization_genome().to_dict()
+    data["schema_version"] = version
+    with pytest.raises(ValueError, match="schema_version"):
+        CPPNGenome.from_dict(data)
+
+
+@pytest.mark.parametrize("field", ["nodes", "connections", "output_ids"])
+@pytest.mark.parametrize("value", [None, {}, "invalid", ()])
+def test_restore_requires_json_arrays(field, value):
+    data = make_serialization_genome().to_dict()
+    data[field] = value
+    with pytest.raises(ValueError, match=field):
+        CPPNGenome.from_dict(data)
+
+
+@pytest.mark.parametrize("field", ["nodes", "connections"])
+@pytest.mark.parametrize("value", [None, [], "invalid"])
+def test_restore_requires_dictionary_records(field, value):
+    data = make_serialization_genome().to_dict()
+    data[field][0] = value
+    with pytest.raises(ValueError, match=field):
+        CPPNGenome.from_dict(data)
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value", "message"),
+    [
+        ("genotype", "input_size", True, "input_size"),
+        ("genotype", "output_size", 3, "output"),
+        ("genotype", "output_ids", [9, 9], "duplicate output"),
+        ("genotype", "output_ids", [9, 999], "output"),
+        ("nodes", "id", 0, "node id"),
+        ("nodes", "activation", "unknown", "activation"),
+        ("nodes", "bias", float("nan"), "bias"),
+        ("nodes", "bias", "0.0", "bias"),
+        ("connections", "source", 999, "source"),
+        ("connections", "target", 0, "target"),
+        ("connections", "weight", float("inf"), "weight"),
+        ("connections", "weight", True, "weight"),
+    ],
+)
+def test_restore_reuses_genotype_validation(section, field, value, message):
+    data = make_serialization_genome().to_dict()
+    record = data if section == "genotype" else data[section][0]
+    record[field] = value
+    with pytest.raises(ValueError, match=message):
+        CPPNGenome.from_dict(data)
+
+
+@pytest.mark.parametrize(
+    "invalidity", ["duplicate node", "duplicate connection", "cycle"]
+)
+def test_restore_rejects_invalid_graph_topology(invalidity):
+    data = make_serialization_genome().to_dict()
+    if invalidity == "duplicate node":
+        data["nodes"].append(dict(data["nodes"][0]))
+    elif invalidity == "duplicate connection":
+        data["connections"].append(dict(data["connections"][0]))
+    else:
+        data["connections"].append({"source": 9, "target": 2, "weight": 1.0})
+    with pytest.raises(ValueError, match=invalidity):
+        CPPNGenome.from_dict(data)
