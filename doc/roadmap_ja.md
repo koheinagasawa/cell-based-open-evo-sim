@@ -41,7 +41,7 @@ Phase 1 の遺伝基盤と Phase 2 の身体基盤は、Phase 0 の契約後に�
 | Cell 更新 | State の二相更新、Profile、出力スロット、接続とメッセージ受信 |
 | 解釈 | `ProfiledInterpreter` による Profile ごとのベクトル割り当て |
 | Genome 例 | `experiments\chemotaxis_bud\genomes.py` などの手書き実装 |
-| CPPN 評価器 | `simulation\cppn.py` の不変な I/O 宣言・ノード・接続記述と直接評価。18入力・9出力は実験側から渡し、身体からの新入力生成は未実装 |
+| CPPN 評価器 | `simulation\cppn.py` の不変な I/O 宣言・ノード・接続記述と直接評価。I/O 数は呼び出し側から渡す。既存の接続確認は18入力・9出力、初回の身体実験契約は18入力・8出力。身体からの新入力生成は未実装 |
 | genotype 保存・復元 | `CPPNGenome.to_dict()` / `from_dict()` によるバージョン付き JSON 互換データへの変換と `copy()` による独立コピー。ファイル入出力は標準 `json` を使う |
 | genotype 変異 | `CPPNGenome.mutate()` による weight・bias・activation の変異と変更前後の記録。明示的 RNG を使い、構造・I/O と親は変更しない |
 | 外部世代ループ | `experiments\cppn_diagnostic\runner.py` の積近似診断用ループ。親選択・複製・変異と、全候補の genotype・系統・seed・結果・失敗を保存する。身体を含む世代交代は未実装 |
@@ -106,6 +106,8 @@ World の法則と明示的評価を混同せず、後の内生的選択は別�
 | P0-02 | [ ] | 物理・予算・比較条件を決める | 身体が役立つ場面、局所 Action、環境反作用、観察時間、資源・Cell・step 上限、seed 集合、記録値、baseline が列挙される |
 
 P0-01 の承認済み契約、P0-02 の承認済み遺伝診断条件と残る身体実験条件は [最小個体実験の契約](MinimalOrganismContract_ja.md) に記録する。
+同契約の「対象と問い」「身体 Action の方向」に従い、初回は独立した円形 Cell の線形粘性抵抗の下で
+身体運動を調べ、推進を要求しない。これは P0-02 の数値予算・比較条件の確定や Phase 2 の完了を意味しない。
 
 P0-01 では、座標入力が world 絶対座標、個体座標、発生時座標、現在位置のどれかを明示する。
 身体 topology、物理的な Cell 接続、メッセージ接続、CPPN graph topology は別概念として名前を分ける。
@@ -170,7 +172,7 @@ Phase 1〜3 では Interpreter と Profile の生成・選択規則を固定し�
 | P2-03 | [ ] | 物理結合と方向付き message link の意味を分離する | 通信接続の有無が意図せず質量・剛性・破断特性を決めない。共有する場合は意味を明記する |
 | P2-04 | [ ] | 種 Cell から決定論的に成長する経路を作る | CPPN が Cell ごとに直接実行され、bud、誕生時 Profile、接続、上限が再現される |
 | P2-05 | [ ] | 発生と行動を同じ Genome + Interpreter で接続する | 別の発生 NN や固定完成身体なしに、発生後も同じ共有 network が Cell State と局所入力から Action を出す |
-| P2-06 | [ ] | 身体依存性の対照実験を保存する | 同じ drive でも topology 差で測定結果が変わり、drive-off/no-movement 対照と有限値・step 上限を確認できる |
+| P2-06 | [ ] | 身体依存性の対照実験を保存する | 同じ drive でも topology 差で測定結果が変わり、drive-off 対照と有限値・step 上限を確認できる。drive-off は無運動を意味せず、具体条件は最小個体実験の契約に従う |
 
 内部力だけで重心移動しない条件では、移動しないことを solver bug と決めつけない。
 環境との接触、摩擦、流体抵抗、基質への作用など、選んだ世界法則の下で身体が役立つ関係を作る。
