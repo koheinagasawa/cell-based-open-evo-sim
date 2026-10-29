@@ -29,6 +29,8 @@ class Cell:
         energy_init: float = 1.0,
         energy_max: float = 1.0,
         radius: float = 0.5,
+        mass: float = 1.0,
+        velocity=None,
         **kwargs,
     ):
         self.id = id or str(uuid.uuid4())
@@ -74,6 +76,12 @@ class Cell:
         self.energy_max = float(energy_max)
         self.energy = float(energy_init)
         self.radius = float(radius)
+        self.mass = float(mass)
+        self.velocity = (
+            np.zeros_like(self.position)
+            if velocity is None
+            else np.array(velocity, dtype=float, copy=True)
+        )
 
         self.age = 0
         self.raw_output = None  # Last raw output vector from genome
