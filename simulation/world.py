@@ -2,6 +2,7 @@ import hashlib
 import struct
 import time
 from collections import defaultdict
+from numbers import Integral
 from typing import Any, Callable, Dict, Optional, Protocol
 
 import numpy as np
@@ -80,13 +81,26 @@ class World:
         birth_callback: Optional[BirthCallback] = None,
         field_added_callback: Optional[FieldAddedCallback] = None,
         physics_solver=None,
+        physics_substeps: int = 1,
     ):
         """
         :param seed: master seed for reproducible experiments. If None, use 0.
 
         World depends on abstract policies injected via the constructor.
         Do not import concrete policy classes here; keep this layer thin.
+
+        physics_substeps repeats only the physics phase per control update.
+        Set 10 with physical dt=0.01 for the inertial experiment's interval 0.1.
+        The default preserves the legacy one-step physics schedule.
         """
+        if (
+            not isinstance(physics_substeps, Integral)
+            or isinstance(physics_substeps, bool)
+            or physics_substeps < 1
+        ):
+            raise ValueError("physics_substeps must be a positive integer")
+        if physics_solver is None and physics_substeps != 1:
+            raise ValueError("physics_substeps requires a physics_solver")
         self.cells = cells
         self.agents: Dict[str, Any] = {a.id: a for a in (agents or [])}
         self.time = 0
@@ -123,6 +137,7 @@ class World:
 
         # Physics (optional)
         self.physics_solver = physics_solver
+        self.physics_substeps = int(physics_substeps)
 
         # Performance Metrics
         self.perf_stats: Dict[str, float] = defaultdict(float)
@@ -292,7 +307,8 @@ class World:
         # --------  Phase 3.5: physics forces (optional) --------
         if self.physics_solver is not None:
             t_physics_start = time.perf_counter()
-            self.physics_solver.step(self.cells)
+            for _ in range(self.physics_substeps):
+                self.physics_solver.step(self.cells)
             self.perf_stats["time_phase3_5_physics"] = (
                 time.perf_counter() - t_physics_start
             )
