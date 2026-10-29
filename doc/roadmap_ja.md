@@ -1,6 +1,6 @@
 # ロードマップ
 
-**状態:** P0-01・P0-02、P1-01〜P1-05、P2-01〜P2-03 は完了。Phase 1 は非シミュレーション診断、P2-01/P2-02 は低層物理と4ケースの数値診断、P2-03 は出生なしの World 接続と通信からの分離で確認した。CPPN・新しい出生経路への接続と P2-04 以降、Phase 2 全体のゲートは未完了。
+**状態:** P0-01・P0-02、P1-01〜P1-05、P2-01〜P2-04 は完了。P2-04 は種 Cell からの CPPN 成長経路を、能動的な収縮・伸長を物理に適用しない範囲で確認した。P2-05 以降、Phase 2 全体のゲートは未完了。
 
 ## 目的と読み方
 
@@ -41,17 +41,17 @@ Phase 1 の遺伝基盤と Phase 2 の身体基盤は、Phase 0 の契約後に�
 | Cell 更新 | State の二相更新、Profile、出力スロット、接続とメッセージ受信 |
 | 解釈 | `ProfiledInterpreter` による Profile ごとのベクトル割り当て |
 | Genome 例 | `experiments\chemotaxis_bud\genomes.py` などの手書き実装 |
-| CPPN 評価器 | `simulation\cppn.py` の不変な I/O 宣言・ノード・接続記述と直接評価。I/O 数は呼び出し側から渡す。既存の接続確認は18入力・9出力、初回の身体実験契約は18入力・8出力。身体からの新入力生成は未実装 |
+| CPPN 評価器 | `simulation\cppn.py` の不変な I/O 宣言・ノード・接続記述と直接評価。I/O 数は呼び出し側から渡す。既存の接続確認は18入力・9出力、新しい成長経路は身体から18入力を構築して8出力を解釈する |
 | genotype 保存・復元 | `CPPNGenome.to_dict()` / `from_dict()` によるバージョン付き JSON 互換データへの変換と `copy()` による独立コピー。ファイル入出力は標準 `json` を使う |
 | genotype 変異 | `CPPNGenome.mutate()` による weight・bias・activation の変異と変更前後の記録。明示的 RNG を使い、構造・I/O と親は変更しない |
 | 外部世代ループ | `experiments\cppn_diagnostic\runner.py` の積近似診断用ループ。親選択・複製・変異と、全候補の genotype・系統・seed・結果・失敗を保存する。身体を含む世代交代は未実装 |
 | 遺伝診断の比較 | `experiments\cppn_diagnostic\compare.py` で3条件・5seed を独立に2回実行・照合し、誤差・変異記録・CSV/JSON 集計・画像を保存した。身体実験の証拠ではない |
-| 成長 | `AgentBudding` による同一 Agent 内の Cell 追加 |
+| 成長 | 既存の `AgentBudding` を維持。`simulation\minimal_organism.py` に種 Cell からの出芽予約・親子分配・出生時 Profile と物理結合・上限・失敗記録を追加 |
 | Field | 減衰する Gaussian source の和としてのサンプリング |
 | 通信 | 接続を介したメッセージ配送と次フレーム受信 |
 | 物理 | 既存の soft repulsion・受動ばね・overdamped 更新を維持。別経路に質量・速度、独立した物理結合、可変目標長、線形粘性抵抗と半陰的 Euler 更新 |
-| 物理診断 | `experiments\physics_diagnostic\runner.py` で4ケースと drive-off の計10本を保存し、半刻み比較・解析解・安全条件を確認。CPPN・発生経路は未接続 |
-| World の物理接続 | `physics_substeps` で物理だけを複数回更新。出生なしの新経路で、通信配送と物理軌跡が独立することを確認。新しい出生・CPPN 身体経路は未接続 |
+| 物理診断 | `experiments\physics_diagnostic\runner.py` で4ケースと drive-off の計10本を保存し、半刻み比較・解析解・安全条件を確認。これは CPPN・発生経路とは別の診断 |
+| World の物理接続 | `physics_substeps` で物理だけを複数回更新。通信配送と物理軌跡の独立、および専用 World で出生を含む成長経路を確認。CPPN の収縮指令の物理適用は未接続 |
 | 実験 | `ExperimentSpec`、`runner_generic`、メトリクス、イベント・フレーム保存 |
 
 Field は現時点では完全な拡散系でも、消費可能な資源循環でもない。
@@ -62,7 +62,7 @@ soft repulsion とばねがあることを、hard collision constraint の完成
 
 ### 中核的な不足
 
-- 身体から18要素入力を構築して各 Cell で CPPN を直接評価する実験経路。
+- 身体入力から直接評価した CPPN の収縮指令を、成長と同じ実行経路で物理へ適用する接続。
 - 身体を含む外部世代ループへの接続。
 - 身体の配置や結合によって結果が変わる局所アクチュエータと環境反作用。
 - 子孫を種 Cell から初期化し直し、発生と行動を再現するライフサイクル。
@@ -172,7 +172,7 @@ Phase 1〜3 では Interpreter と Profile の生成・選択規則を固定し�
 | P2-01 | [x] | 局所的な身体 Action と環境反作用を一つ定義する | Cell が位置を直接書き換えず、Action、身体結合、接触・摩擦等を通して結果が生じる |
 | P2-02 | [x] | 最小ソルバー構成と数値予算を実装する | 選んだ接触・結合・速度処理が有限値を保ち、`dt`・反復・許容誤差の受入条件を満たす |
 | P2-03 | [x] | 物理結合と方向付き message link の意味を分離する | 通信接続の有無が意図せず質量・剛性・破断特性を決めない。共有する場合は意味を明記する |
-| P2-04 | [ ] | 種 Cell から決定論的に成長する経路を作る | CPPN が Cell ごとに直接実行され、bud、誕生時 Profile、接続、上限が再現される |
+| P2-04 | [x] | 種 Cell から決定論的に成長する経路を作る | CPPN が Cell ごとに直接実行され、bud、誕生時 Profile、接続、上限が再現される |
 | P2-05 | [ ] | 発生と行動を同じ Genome + Interpreter で接続する | 別の発生 NN や固定完成身体なしに、発生後も同じ共有 network が Cell State と局所入力から Action を出す |
 | P2-06 | [ ] | 身体依存性の対照実験を保存する | 同じ drive でも topology 差で測定結果が変わり、drive-off 対照と有限値・step 上限を確認できる。drive-off は無運動を意味せず、具体条件は最小個体実験の契約に従う |
 
@@ -180,7 +180,10 @@ P2-01/P2-02 は、既存ソルバーを維持した別経路の低層物理と�
 実装・artifact・観察値・適用限界は [最小個体実験の契約](MinimalOrganismContract_ja.md) の
 「慣性あり物理コアと数値診断の実装結果」に記録する。
 P2-03 は、明示的な `PhysicalBond` と World の物理 substep を使う出生なしの経路で分離を確認した。
-新しい出生処理や CPPN 身体入力を含む統合は後続に残す。詳細は同契約の「出生なしの World への接続と通信からの分離」に記録する。
+詳細は同契約の「出生なしの World への接続と通信からの分離」に記録する。
+P2-04 は `MinimalOrganismWorld` で、出生契約・身体入力・CPPN 直接評価を接続した。
+手書き CPPN の1,000区間の成長 trace と限界は同契約の「種 Cell からの決定論的な成長経路」に記録する。
+能動的な収縮指令はまだ物理へ適用せず、P2-05 に残す。
 
 内部力だけで重心移動しない条件では、移動しないことを solver bug と決めつけない。
 環境との接触、摩擦、流体抵抗、基質への作用など、選んだ世界法則の下で身体が役立つ関係を作る。

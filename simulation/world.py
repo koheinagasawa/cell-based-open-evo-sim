@@ -306,7 +306,7 @@ class World:
         if self.physics_solver is not None:
             t_physics_start = time.perf_counter()
             for _ in range(self.physics_substeps):
-                self.physics_solver.step(self.cells)
+                self._step_physics()
             self.perf_stats["time_phase3_5_physics"] = (
                 time.perf_counter() - t_physics_start
             )
@@ -359,6 +359,9 @@ class World:
         )
 
         self.time += 1
+
+    def _step_physics(self):
+        self.physics_solver.step(self.cells)
 
     def apply_move(self, cell, delta):
         # Make 'delta' match the dimensionality of the cell position.
