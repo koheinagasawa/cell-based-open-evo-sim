@@ -90,8 +90,6 @@ class World:
         Do not import concrete policy classes here; keep this layer thin.
 
         physics_substeps repeats only the physics phase per control update.
-        Set 10 with physical dt=0.01 for the inertial experiment's interval 0.1.
-        The default preserves the legacy one-step physics schedule.
         """
         if (
             not isinstance(physics_substeps, Integral)
