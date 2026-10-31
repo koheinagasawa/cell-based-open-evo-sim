@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from simulation.cell import Cell
 from simulation.cppn import ConnectionGene, CPPNGenome, NodeGene
 from simulation.minimal_organism import (
     MinimalOrganismInterpreter,
@@ -66,6 +67,7 @@ def trace_metadata(world):
         "genotype": world.agent.genome.to_dict(),
         "interpreter": world.agent.interpreter.to_metadata(),
         "seed": world.seed,
+        "drive_off": world.drive_off,
         "physics": asdict(world.physics_solver.config),
         "revision": revision,
         "command": sys.argv,
@@ -99,7 +101,7 @@ def test_seed_initialization_and_shared_rules():
 
 
 def test_births_share_parameters_but_reset_and_separate_cell_state(test_output_dir):
-    world = MinimalOrganismWorld(genome(contraction=5))
+    world = MinimalOrganismWorld(genome(contraction=5), drive_off=True)
     trace = [world.snapshot()]
     world.step()
     seed, child = world.cells
@@ -222,7 +224,9 @@ def test_birth_overlap_tolerance_is_distinct_from_physical_safety(
     world.cells[1].energy = 0
     old_energy = world.cells[0].energy
     monkeypatch.setattr(
-        InertialPhysicsSolver, "step", lambda self, cells: PhysicsDiagnostics()
+        InertialPhysicsSolver,
+        "step",
+        lambda self, cells, commands=None: PhysicsDiagnostics(),
     )
     world.step()
     assert len(world.cells) == (3 if allowed else 2)
@@ -236,7 +240,7 @@ def test_birth_overlap_tolerance_is_distinct_from_physical_safety(
 def test_failed_physics_does_not_commit_reserved_births_or_fees(monkeypatch):
     world = MinimalOrganismWorld(genome())
 
-    def fail(cells):
+    def fail(cells, commands=None):
         raise PhysicsFailure(
             "speed_limit",
             "before",
@@ -334,7 +338,9 @@ def test_same_interval_children_compete_in_parent_birth_order(monkeypatch):
     first_child.state[:2] = [-1.5, np.sqrt(0.75)]
     world.cells.reverse()
     monkeypatch.setattr(
-        InertialPhysicsSolver, "step", lambda self, cells: PhysicsDiagnostics()
+        InertialPhysicsSolver,
+        "step",
+        lambda self, cells, commands=None: PhysicsDiagnostics(),
     )
     world.step()
     assert len(world.cells) == 3
@@ -375,7 +381,7 @@ def test_partial_physics_failure_records_physical_time_and_no_birth(monkeypatch)
     original = world.physics_solver.step
     calls = 0
 
-    def fail_on_third(cells):
+    def fail_on_third(cells, commands=None):
         nonlocal calls
         calls += 1
         if calls == 3:
@@ -386,7 +392,7 @@ def test_partial_physics_failure_records_physical_time_and_no_birth(monkeypatch)
                 np.array([c.position for c in cells]),
                 np.array([c.velocity for c in cells]),
             )
-        return original(cells)
+        return original(cells, commands)
 
     monkeypatch.setattr(world.physics_solver, "step", fail_on_third)
     with pytest.raises(PhysicsFailure):
@@ -460,3 +466,185 @@ def test_bounded_growth_trace_reaches_the_observation_limit(test_output_dir):
     )
     with pytest.raises(RuntimeError, match="observation limit"):
         world.step()
+
+
+@pytest.mark.parametrize(("dt", "substeps"), [(0.01, 10), (0.005, 20)])
+def test_interpreted_drive_is_held_and_matches_direct_physics(
+    dt, substeps, monkeypatch
+):
+    world = MinimalOrganismWorld(genome(contraction=5), physics_dt=dt)
+    world.step()
+    parent, child = world.cells
+    first = world.snapshot()
+    assert first["cells"][0]["requested_contraction"] == 1
+    assert first["cells"][0]["applied_contraction"] == 1
+    assert first["cells"][1]["applied_contraction"] == 0
+    reference_cells = [
+        Cell(c.position.copy(), genome=None, id=c.id, velocity=c.velocity.copy())
+        for c in world.cells
+    ]
+    reference = InertialPhysicsSolver(
+        world.physics_solver.bonds, config=world.physics_solver.config
+    )
+    original = world.physics_solver.step
+    received = []
+
+    def record(cells, commands=None):
+        received.append(dict(commands))
+        result = original(cells, commands)
+        # The physical substeps must not re-read mutable output slots.
+        parent.output_slots["contraction"] = -1
+        return result
+
+    monkeypatch.setattr(world.physics_solver, "step", record)
+    world.step()
+    expected = {parent.id: 1.0, child.id: 1.0}
+    assert received == [expected] * substeps
+    for _ in range(substeps):
+        reference.step(reference_cells, expected)
+    for actual, direct in zip(world.cells[:2], reference_cells):
+        np.testing.assert_array_equal(actual.position, direct.position)
+        np.testing.assert_array_equal(actual.velocity, direct.velocity)
+    assert parent.age == 2 and child.age == 1
+    assert parent.genome is child.genome
+
+
+def test_opposite_commands_are_clipped_per_cell_before_averaging():
+    g = genome(contraction=5)
+    opposite = CPPNGenome(
+        18, 8, g.nodes, (*g.connections, ConnectionGene(0, 25, -10)), g.output_ids
+    )
+    world = MinimalOrganismWorld(opposite)
+    world.step()
+    world.step()
+    parent, child = world.cells[:2]
+    assert parent.raw_output[-1] == 5
+    assert child.raw_output[-1] == -5
+    np.testing.assert_array_equal(parent.position, [0, 0])
+    np.testing.assert_array_equal(child.position, [1, 0])
+    assert [c["applied_contraction"] for c in world.snapshot()["cells"][:2]] == [1, -1]
+
+
+def test_drive_off_preserves_interpretation_and_neutral_growth():
+    g = genome(contraction=5)
+    driven = MinimalOrganismWorld(g)
+    off = MinimalOrganismWorld(CPPNGenome.from_dict(g.to_dict()), drive_off=True)
+    neutral = MinimalOrganismWorld(genome())
+    for _ in range(3):
+        driven.step()
+        off.step()
+        neutral.step()
+    assert driven.cells[0].position[0] != off.cells[0].position[0]
+    for actual, baseline in zip(off.cells, neutral.cells):
+        np.testing.assert_array_equal(actual.position, baseline.position)
+        np.testing.assert_array_equal(actual.state, baseline.state)
+        assert actual.energy == baseline.energy
+    assert all(c["applied_contraction"] == 0 for c in off.snapshot()["cells"])
+    assert off.cells[0].output_slots["contraction"] == 1
+    assert off.snapshot()["drive_off"] is True
+
+
+@pytest.mark.parametrize("value", [1, 0, None, "off"])
+def test_drive_off_requires_an_explicit_boolean(value):
+    with pytest.raises(ValueError, match="drive_off"):
+        MinimalOrganismWorld(genome(), drive_off=value)
+
+
+def behavior_genome():
+    g = genome()
+    nodes = (*g.nodes, NodeGene(26, "sin"))
+    connections = (
+        *g.connections,
+        ConnectionGene(14, 22, -1),  # Only the unconnected seed requests birth.
+        ConnectionGene(2, 26, 0.1),
+        ConnectionGene(26, 25, 0.5),
+        ConnectionGene(6, 25, 0.1),
+    )
+    return CPPNGenome(18, 8, nodes, connections, g.output_ids)
+
+
+def test_same_cppn_drives_growth_state_feedback_and_body_motion(test_output_dir):
+    g = behavior_genome()
+    active = MinimalOrganismWorld(g)
+    replay = MinimalOrganismWorld(CPPNGenome.from_dict(g.to_dict()))
+    off = MinimalOrganismWorld(CPPNGenome.from_dict(g.to_dict()), drive_off=True)
+    frames = {"active": [active.snapshot()], "drive_off": [off.snapshot()]}
+    lengths = []
+    for interval in range(210):
+        # Check the full current observation, including changing physical inputs.
+        for cell in active.cells:
+            expected = g.activate(active.inputs_for(cell.id))
+            cell._expected = expected
+        replay.cells.reverse()
+        active.step()
+        replay.step()
+        off.step()
+        assert active.snapshot() == replay.snapshot()
+        assert active.events == replay.events
+        assert len(active.cells) == len(off.cells) == 2
+        for cell in active.cells:
+            if hasattr(cell, "_expected"):
+                np.testing.assert_array_equal(cell.raw_output, cell._expected)
+            assert cell.genome is active.agent.genome
+            assert cell.interpreter is active.agent.interpreter
+        if interval:
+            lengths.append(
+                np.linalg.norm(active.cells[1].position - active.cells[0].position)
+            )
+        frames["active"].append(active.snapshot())
+        frames["drive_off"].append(off.snapshot())
+    assert np.ptp(lengths) > 0.01
+    np.testing.assert_array_equal([c.position for c in off.cells], [[0, 0], [1, 0]])
+    assert len(births(active, "born")) == len(births(off, "born")) == 1
+    assert all(c.energy == 31 for c in active.cells)
+    assert not active.failed and not off.failed
+    assert active.time == off.time == 210
+    assert [c.age for c in active.cells] == [210, 209]
+    for mode, world in (("active", active), ("drive_off", off)):
+        (test_output_dir / f"{mode}_trace.json").write_text(
+            json.dumps(
+                {
+                    **trace_metadata(world),
+                    "frames": frames[mode],
+                    "events": world.events,
+                },
+                allow_nan=False,
+            ),
+            encoding="utf-8",
+        )
+
+
+def test_drive_failure_preserves_held_command_and_reserved_birth(monkeypatch):
+    world = MinimalOrganismWorld(genome(contraction=-5))
+    received = []
+
+    def fail(cells, commands=None):
+        received.append(dict(commands))
+        raise PhysicsFailure(
+            "speed_limit",
+            "before",
+            tuple(c.id for c in cells),
+            np.array([c.position for c in cells]),
+            np.array([c.velocity for c in cells]),
+        )
+
+    monkeypatch.setattr(world.physics_solver, "step", fail)
+    with pytest.raises(PhysicsFailure):
+        world.step()
+    assert received == [{world.cells[0].id: -1}]
+    assert world.failure["state"]["cells"][0]["applied_contraction"] == -1
+    assert world.cells[0].energy == 63
+    assert len(world.cells) == 1
+    assert births(world, "unexecuted")[0]["spent_cost"] == 0
+
+
+def test_zero_growth_budget_does_not_disable_cppn_physical_drive():
+    world = MinimalOrganismWorld(genome(contraction=0.5))
+    world.step()
+    for cell in world.cells:
+        cell.energy = 0
+    world.step()
+    assert len(world.cells) == 2
+    assert any(c.velocity[0] != 0 for c in world.cells)
+    assert all(c.energy == 0 for c in world.cells)
+    assert all(c["applied_contraction"] == 0.5 for c in world.snapshot()["cells"])

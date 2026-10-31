@@ -1,7 +1,8 @@
-"""The approved seed-cell growth path; physical actuation remains neutral."""
+"""Shared CPPN development and physical actuation for the minimal organism."""
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
 from numbers import Integral, Real
 
@@ -120,7 +121,14 @@ class MinimalOrganismWorld(World):
     path uses the same World control/physics scheduling, without fields or messages.
     """
 
-    def __init__(self, genome: CPPNGenome, *, seed: int = 0, physics_dt: float = 0.01):
+    def __init__(
+        self,
+        genome: CPPNGenome,
+        *,
+        seed: int = 0,
+        physics_dt: float = 0.01,
+        drive_off: bool = False,
+    ):
         if not isinstance(genome, CPPNGenome) or (
             genome.input_size,
             genome.output_size,
@@ -130,6 +138,8 @@ class MinimalOrganismWorld(World):
             )
         if not isinstance(seed, Integral) or isinstance(seed, bool) or seed < 0:
             raise ValueError("seed must be a nonnegative integer")
+        if not isinstance(drive_off, bool):
+            raise ValueError("drive_off must be a boolean")
         if (
             not isinstance(physics_dt, Real)
             or isinstance(physics_dt, bool)
@@ -147,6 +157,15 @@ class MinimalOrganismWorld(World):
         self.failure: dict | None = None
         self._next_birth_order = 1
         self._phase = "initialization"
+        self.drive_off = drive_off
+        self._applied_commands: dict[str, float] = {}
+        self._commands_ready = False
+        self._deadline: float | None = None
+        self._interval_diagnostics = {
+            "max_speed": 0.0,
+            "max_overlap": 0.0,
+            "max_bond_length": 0.0,
+        }
         self._candidate_ids: tuple[str, ...] | None = None
         first = self._new_cell(0, (0, 0), (0, 0), 63, (0, 0))
         self.agent.cells.append(first)
@@ -334,10 +353,32 @@ class MinimalOrganismWorld(World):
 
     def _step_physics(self):
         self._phase = "physics"
-        super()._step_physics()
+        self._check_deadline()
+        if not self._commands_ready:
+            self._applied_commands = {
+                c.id: 0.0 if self.drive_off else float(c.output_slots["contraction"])
+                for c in self.cells
+            }
+            self._commands_ready = True
+            self._interval_diagnostics = dict.fromkeys(self._interval_diagnostics, 0.0)
+        diagnostic = self.physics_solver.step(self.cells, self._applied_commands)
+        for name in self._interval_diagnostics:
+            self._interval_diagnostics[name] = max(
+                self._interval_diagnostics[name], getattr(diagnostic, name)
+            )
         self.physics_steps += 1
 
-    def step(self):
+    def _check_deadline(self):
+        if self._deadline is not None and time.monotonic() > self._deadline:
+            raise TimeoutError("minimal-organism rollout deadline exceeded")
+
+    def step(self, *, deadline: float | None = None):
+        if deadline is not None and (
+            not isinstance(deadline, Real)
+            or isinstance(deadline, bool)
+            or not np.isfinite(deadline)
+        ):
+            raise ValueError("deadline must be a finite monotonic-clock time")
         if self.failed:
             raise RuntimeError("cannot continue a failed minimal-organism rollout")
         if self.time >= 1000:
@@ -345,8 +386,11 @@ class MinimalOrganismWorld(World):
                 "the 1000-control-interval observation limit was reached"
             )
         start = self.time
+        self._deadline = deadline
         self._phase = "control"
+        self._commands_ready = False
         try:
+            self._check_deadline()
             self._validate_body()
             self.cells.sort(key=lambda c: c.birth_order)
             super().step()
@@ -354,11 +398,13 @@ class MinimalOrganismWorld(World):
             self.time = start
             self._phase = "birth"
             while self.pending_births:
+                self._check_deadline()
                 self._finish_birth(self.pending_births[0])
                 self.pending_births.pop(0)
+            self._check_deadline()
             self.time = start + 1
             self.last_completed_snapshot = self.snapshot()
-        except (ValueError, FloatingPointError, TypeError) as exc:
+        except (ValueError, FloatingPointError, TypeError, TimeoutError) as exc:
             self.time = start
             self.failed = True
             failure_time = self.physics_steps * self.physics_solver.config.dt
@@ -380,7 +426,11 @@ class MinimalOrganismWorld(World):
                 "reason": (
                     exc.reason
                     if isinstance(exc, PhysicsFailure)
-                    else type(exc).__name__
+                    else (
+                        "timeout"
+                        if isinstance(exc, TimeoutError)
+                        else type(exc).__name__
+                    )
                 ),
                 "phase": self._phase,
                 "state": self.snapshot(),
@@ -414,6 +464,8 @@ class MinimalOrganismWorld(World):
             "physical_time": self.physics_steps * self.physics_solver.config.dt,
             "physics_steps": self.physics_steps,
             "seed": self.seed,
+            "drive_off": self.drive_off,
+            "physics_diagnostics": dict(self._interval_diagnostics),
             "cells": [
                 {
                     "id": c.id,
@@ -432,7 +484,7 @@ class MinimalOrganismWorld(World):
                     "requested_contraction": float(
                         c.output_slots.get("contraction", 0)
                     ),
-                    "applied_contraction": 0.0,
+                    "applied_contraction": self._applied_commands.get(c.id, 0.0),
                 }
                 for c in sorted(self.cells, key=lambda c: c.birth_order)
             ],
